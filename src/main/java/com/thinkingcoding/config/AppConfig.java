@@ -29,6 +29,30 @@ public class AppConfig {
     @JsonProperty("ai")
     private AIConfig ai = new AIConfig(); // AI行为配置
 
+    @JsonProperty("skills")
+    private List<SkillConfig> skills = new ArrayList<>();
+
+    @JsonProperty("rag")
+    private RagConfig rag = new RagConfig();
+
+    public List<SkillConfig> getSkills() {
+        return skills;
+    }
+
+    public void setSkills(List<SkillConfig> skills) {
+        this.skills = skills;
+    }
+
+    public RagConfig getRag() {
+        if (rag == null) {
+            rag = new RagConfig();
+        }
+        return rag;
+    }
+
+    public void setRag(RagConfig rag) {
+        this.rag = rag;
+    }
 
     // Getters and Setters
     public Map<String, ModelConfig> getModels() {
@@ -171,6 +195,9 @@ public class AppConfig {
         @JsonProperty("search")
         private ToolConfig search = new ToolConfig();
 
+        @JsonProperty("semanticSearch")
+        private ToolConfig semanticSearch = new ToolConfig();
+
         // Getters and Setters
         public ToolConfig getFileManager() {
             if (fileManager == null) {
@@ -214,6 +241,17 @@ public class AppConfig {
 
         public void setSearch(ToolConfig search) {
             this.search = search;
+        }
+
+        public ToolConfig getSemanticSearch() {
+            if (semanticSearch == null) {
+                semanticSearch = new ToolConfig();
+            }
+            return semanticSearch;
+        }
+
+        public void setSemanticSearch(ToolConfig semanticSearch) {
+            this.semanticSearch = semanticSearch;
         }
     }
 
@@ -291,5 +329,182 @@ public class AppConfig {
         public void setAutoProcessToolResults(boolean autoProcessToolResults) {
             this.autoProcessToolResults = autoProcessToolResults;
         }
+    }
+
+    @Data
+    public static class SkillConfig {
+        @JsonProperty("name")
+        private String name;
+
+        @JsonProperty("description")
+        private String description;
+
+        @JsonProperty("className")
+        private String className;
+
+        @JsonProperty("enabled")
+        private boolean enabled = true;
+
+        @JsonProperty("config")
+        private Map<String, Object> config = new HashMap<>();
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+
+        public String getClassName() { return className; }
+        public void setClassName(String className) { this.className = className; }
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+        public Map<String, Object> getConfig() { return config; }
+        public void setConfig(Map<String, Object> config) { this.config = config; }
+    }
+
+    @Data
+    public static class RagConfig {
+        @JsonProperty("enabled")
+        private boolean enabled = true;
+
+        @JsonProperty("autoIndex")
+        private boolean autoIndex = true;
+
+        @JsonProperty("workspace")
+        private String workspace;
+
+        @JsonProperty("topK")
+        private int topK = 5;
+
+        @JsonProperty("baseUrl")
+        private String baseUrl;
+
+        @JsonProperty("embeddingModel")
+        private String embeddingModel;
+
+        @JsonProperty("chunkSize")
+        private int chunkSize = 1000;
+
+        @JsonProperty("chunkOverlap")
+        private int chunkOverlap = 200;
+
+        @JsonProperty("cloud")
+        private RagCloudConfig cloud = new RagCloudConfig();
+
+        @JsonProperty("apiKey")
+        private String apiKey;
+
+        @JsonProperty("cloudStoreUrl")
+        private String cloudStoreUrl;
+
+        public RagCloudConfig getCloud() {
+            if (cloud == null) {
+                cloud = new RagCloudConfig();
+            }
+            return cloud;
+        }
+
+        public void setCloud(RagCloudConfig cloud) {
+            this.cloud = cloud;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
+
+        public String getCloudStoreUrl() {
+            return cloudStoreUrl;
+        }
+
+        public void setCloudStoreUrl(String cloudStoreUrl) {
+            this.cloudStoreUrl = cloudStoreUrl;
+        }
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+        public boolean isAutoIndex() { return autoIndex; }
+        public void setAutoIndex(boolean autoIndex) { this.autoIndex = autoIndex; }
+
+        public String getWorkspace() { return workspace; }
+        public void setWorkspace(String workspace) { this.workspace = workspace; }
+
+        public int getTopK() { return topK; }
+        public void setTopK(int topK) { this.topK = topK; }
+
+        public String getBaseUrl() { return baseUrl; }
+        public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+
+        public String getEmbeddingModel() { return embeddingModel; }
+        public void setEmbeddingModel(String embeddingModel) { this.embeddingModel = embeddingModel; }
+
+        public int getChunkSize() { return chunkSize; }
+        public void setChunkSize(int chunkSize) { this.chunkSize = chunkSize; }
+
+        public int getChunkOverlap() { return chunkOverlap; }
+        public void setChunkOverlap(int chunkOverlap) { this.chunkOverlap = chunkOverlap; }
+    }
+
+    @Data
+    public static class RagCloudConfig {
+        @JsonProperty("queryEnabled")
+        private boolean queryEnabled = true;
+
+        @JsonProperty("minScore")
+        private double minScore = 0.7;
+
+        @JsonProperty("authType")
+        private String authType;
+
+        @JsonProperty("authHeader")
+        private String authHeader;
+
+        @JsonProperty("authKey")
+        private String authKey;
+
+        @JsonProperty("timeoutSeconds")
+        private int timeoutSeconds = 30;
+
+        @JsonProperty("indexName")
+        private String indexName;
+
+        @JsonProperty("queryEndpoint")
+        private String queryEndpoint;
+
+        @JsonProperty("endpoint")
+        private String endpoint;
+
+        public boolean isQueryEnabled() { return queryEnabled; }
+        public void setQueryEnabled(boolean queryEnabled) { this.queryEnabled = queryEnabled; }
+
+        public double getMinScore() { return minScore; }
+        public void setMinScore(double minScore) { this.minScore = minScore; }
+
+        public String getAuthType() { return authType; }
+        public void setAuthType(String authType) { this.authType = authType; }
+
+        public String getAuthHeader() { return authHeader; }
+        public void setAuthHeader(String authHeader) { this.authHeader = authHeader; }
+
+        public String getAuthKey() { return authKey; }
+        public void setAuthKey(String authKey) { this.authKey = authKey; }
+
+        public int getTimeoutSeconds() { return timeoutSeconds; }
+        public void setTimeoutSeconds(int timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
+
+        public String getIndexName() { return indexName; }
+        public void setIndexName(String indexName) { this.indexName = indexName; }
+
+        public String getQueryEndpoint() { return queryEndpoint; }
+        public void setQueryEndpoint(String queryEndpoint) { this.queryEndpoint = queryEndpoint; }
+
+        public String getEndpoint() { return endpoint; }
+        public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
     }
 }
