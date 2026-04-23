@@ -36,6 +36,7 @@ public final class TestPromptBuilder {
                 2) 保持测试文件路径对应的 package 与类名一致。
                 3) 仅修改测试代码，不修改生产代码。
                 4) 继续使用 JUnit 5 + Mockito。
+                5) 优先根据 [error_summary] 判断根因，再参考 [recent_log_tail]。
 
                 源文件路径：%s
                 测试文件路径：%s
@@ -50,7 +51,7 @@ public final class TestPromptBuilder {
                 %s
                 ```
 
-                错误日志：
+                错误上下文（可能包含 [error_summary] 与 [recent_log_tail]）：
                 ```text
                 %s
                 ```

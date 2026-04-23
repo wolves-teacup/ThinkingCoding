@@ -8,7 +8,9 @@ import com.thinkingcoding.service.PerformanceMonitor;
 import com.thinkingcoding.tools.BaseTool;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 在ThinkingCodingCommand中管理AI交互的核心循环
@@ -70,7 +72,7 @@ public class AgentLoop {
             }
 
             // 重置待处理的工具调用
-            pendingToolCall = null;
+            pendingToolCalls.clear();
 
             // 添加用户消息到历史
             ChatMessage userMessage = new ChatMessage("user", input);
@@ -134,38 +136,37 @@ public class AgentLoop {
     }
 
     // 用于缓存工具调用，等待 AI 响应完成后再执行
-    private ToolCall pendingToolCall = null;
+    private final List<ToolCall> pendingToolCalls = new ArrayList<>();
 
     private void handleToolCall(ToolCall toolCall) {
         // 🔥 不再显示工具调用通知（已在流式输出中显示）
         // context.getUi().displayToolCall(toolCall);
 
         // 🔥 缓存工具调用，不立即执行（等待 AI 流式输出完成）
-        this.pendingToolCall = toolCall;
+        this.pendingToolCalls.add(toolCall);
     }
 
     /**
      * 🔥 在 AI 响应完成后执行待处理的工具调用
      */
     public void executePendingToolCall() {
-        if (pendingToolCall == null) {
+        if (pendingToolCalls.isEmpty()) {
             return;
         }
 
-        try {
+        while (!pendingToolCalls.isEmpty()) {
+            ToolCall pendingToolCall = pendingToolCalls.remove(0);
+
             // 非流式触发的工具调用，需要显示完整的确认框
             ToolExecution execution = new ToolExecution(
-                pendingToolCall.getToolName(),
-                pendingToolCall.getDescription() != null ? pendingToolCall.getDescription() : "执行工具操作",
-                pendingToolCall.getParameters(),
-                true
+                    pendingToolCall.getToolName(),
+                    pendingToolCall.getDescription() != null ? pendingToolCall.getDescription() : "执行工具操作",
+                    pendingToolCall.getParameters(),
+                    true
             );
 
             // 🔥 使用新的智能 3 选项确认系统
             ToolExecutionConfirmation.ActionType action = confirmation.askConfirmationWithOptions(execution);
-
-            // 提取文件名用于总结
-            String fileName = extractFileName(pendingToolCall);
 
             switch (action) {
                 case CREATE_ONLY:
@@ -201,9 +202,6 @@ public class AgentLoop {
                     displayCancelSummary(pendingToolCall);
                     break;
             }
-        } finally {
-            // 清空待处理的工具调用
-            pendingToolCall = null;
         }
     }
 
@@ -551,8 +549,8 @@ public class AgentLoop {
             // 🔥 简化输出：只显示简短的执行提示
             // context.getUi().displayInfo("⚙️  正在执行: " + toolCall.getToolName() + "...");
 
-            // 从工具注册表获取工具
-            BaseTool tool = context.getToolRegistry().getTool(toolCall.getToolName());
+            ResolvedTool resolved = resolveToolForExecution(toolCall);
+            BaseTool tool = resolved.tool;
 
             if (tool == null) {
                 context.getUi().displayError("❌ 工具不存在: " + toolCall.getToolName());
@@ -566,7 +564,7 @@ public class AgentLoop {
             }
 
             // 执行工具
-            String arguments = convertParametersToJson(toolCall.getParameters());
+            String arguments = convertParametersToJson(resolved.parameters);
             ToolResult result = tool.execute(arguments);
 
             // 🔥 显示执行结果
@@ -613,6 +611,59 @@ public class AgentLoop {
             // 调试时可以取消注释
             // e.printStackTrace();
             return false;
+        }
+    }
+
+    /**
+     * 将语义化别名工具映射到实际可执行工具，兼容 LangChain4j 原生 Tool Calling。
+     */
+    private ResolvedTool resolveToolForExecution(ToolCall toolCall) {
+        String requestedToolName = toolCall.getToolName();
+        Map<String, Object> params = toolCall.getParameters() == null
+                ? new HashMap<>()
+                : new HashMap<>(toolCall.getParameters());
+
+        BaseTool direct = context.getToolRegistry().getTool(requestedToolName);
+        if (direct != null) {
+            return new ResolvedTool(direct, params);
+        }
+
+        if ("write_file".equals(requestedToolName)) {
+            BaseTool fileManager = context.getToolRegistry().getTool("file_manager");
+            params.put("command", "write");
+            return new ResolvedTool(fileManager, params);
+        }
+
+        if ("read_file".equals(requestedToolName)) {
+            BaseTool fileManager = context.getToolRegistry().getTool("file_manager");
+            params.put("command", "read");
+            return new ResolvedTool(fileManager, params);
+        }
+
+        if ("list_directory".equals(requestedToolName)) {
+            BaseTool fileManager = context.getToolRegistry().getTool("file_manager");
+            params.put("command", "list");
+            return new ResolvedTool(fileManager, params);
+        }
+
+        if ("bash".equals(requestedToolName)) {
+            BaseTool commandExecutor = context.getToolRegistry().getTool("command_executor");
+            if (!params.containsKey("command") && params.containsKey("input")) {
+                params.put("command", params.get("input"));
+            }
+            return new ResolvedTool(commandExecutor, params);
+        }
+
+        return new ResolvedTool(null, params);
+    }
+
+    private static class ResolvedTool {
+        private final BaseTool tool;
+        private final Map<String, Object> parameters;
+
+        private ResolvedTool(BaseTool tool, Map<String, Object> parameters) {
+            this.tool = tool;
+            this.parameters = parameters;
         }
     }
 

@@ -10,11 +10,14 @@ import com.thinkingcoding.skill.SkillResult;
 import com.thinkingcoding.tools.BaseTool;
 import com.thinkingcoding.tools.ToolRegistry;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,6 +28,12 @@ public class AutoTestSkill implements Skill {
     private static final Pattern PACKAGE_PATTERN = Pattern.compile("package\\s+([\\w.]+)\\s*;");
     private static final Pattern CLASS_PATTERN = Pattern.compile("(?:public\\s+)?class\\s+(\\w+)");
     private static final Pattern CODE_BLOCK_PATTERN = Pattern.compile("```(?:java)?\\s*([\\s\\S]*?)```");
+    private static final int DEFAULT_ERROR_SNIPPET_CHARS = 3200;
+    private static final int DEFAULT_LOG_TAIL_CHARS = 1800;
+    private static final int DEFAULT_MAX_ERROR_CONTEXT_CHARS = 8000;
+    private static final String[] IMPORTANT_MARKERS = new String[]{
+            "caused by", "exception", "error", "failed", "compilation", "cannot find symbol", "assert"
+    };
 
     private final AIService aiService;
     private final ToolRegistry toolRegistry;
@@ -67,6 +76,7 @@ public class AutoTestSkill implements Skill {
             int maxRetries = Math.max(1, context.getMaxRetries());
             String mavenTestName = testPath.getFileName().toString().replace(".java", "");
             String lastError = null;
+            AutoTestOptions options = resolveOptions();
 
             for (int attempt = 1; attempt <= maxRetries; attempt++) {
                 ToolResult runResult = runTargetTest(mavenTestName);
@@ -74,7 +84,7 @@ public class AutoTestSkill implements Skill {
                     return SkillResult.success("AutoTest skill finished successfully.", testPath.toString(), attempt);
                 }
 
-                lastError = shrinkLog(runResult.getError() != null ? runResult.getError() : runResult.getOutput());
+                lastError = shrinkLog(runResult.getError() != null ? runResult.getError() : runResult.getOutput(), options);
                 if (attempt == maxRetries) {
                     break;
                 }
@@ -112,7 +122,7 @@ public class AutoTestSkill implements Skill {
         aiService.setToolCallHandler(toolCall -> {
             // Skill output is text-only; ignore tool calls from the model here.
         });
-        aiService.streamingChat(prompt, new ArrayList<ChatMessage>(), model);
+        aiService.streamingChat(prompt, new ArrayList<>(), model);
         return content.toString();
     }
 
@@ -181,15 +191,137 @@ public class AutoTestSkill implements Skill {
         return sb.toString();
     }
 
-    private String shrinkLog(String log) {
-        if (log == null) {
+    private String shrinkLog(String log, AutoTestOptions options) {
+        String normalized = normalizeLog(log);
+        if (normalized.isEmpty()) {
             return "";
         }
-        int limit = 8000;
-        if (log.length() <= limit) {
-            return log;
+
+        String summary = extractImportantLines(normalized, options.errorSnippetChars);
+        String tail = tail(normalized, options.logTailChars);
+
+        String context;
+        if (summary.isBlank()) {
+            context = tail;
+        } else {
+            context = "[error_summary]\n" + summary + "\n\n[recent_log_tail]\n" + tail;
         }
-        return log.substring(log.length() - limit);
+
+        if (context.length() <= options.maxErrorContextChars) {
+            return context;
+        }
+        return context.substring(context.length() - options.maxErrorContextChars);
+    }
+
+    private String normalizeLog(String log) {
+        if (log == null || log.isBlank()) {
+            return "";
+        }
+        return log.replace("\r\n", "\n").replace('\r', '\n').trim();
+    }
+
+    private String extractImportantLines(String normalizedLog, int maxChars) {
+        String[] lines = normalizedLog.split("\\n");
+        Set<String> selected = new LinkedHashSet<>();
+
+        for (String line : lines) {
+            String trimmed = line == null ? "" : line.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+
+            if (containsImportantMarker(trimmed) || isStackTraceLine(trimmed)) {
+                selected.add(trimmed);
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (String line : selected) {
+            if (sb.length() + line.length() + 1 > maxChars) {
+                break;
+            }
+            if (!sb.isEmpty()) {
+                sb.append('\n');
+            }
+            sb.append(line);
+        }
+        return sb.toString();
+    }
+
+    private boolean containsImportantMarker(String line) {
+        String lower = line.toLowerCase(Locale.ROOT);
+        for (String marker : IMPORTANT_MARKERS) {
+            if (lower.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isStackTraceLine(String line) {
+        return line.startsWith("at ") || line.startsWith("... ");
+    }
+
+    private String tail(String value, int chars) {
+        if (value.length() <= chars) {
+            return value;
+        }
+        return value.substring(value.length() - chars);
+    }
+
+    private AutoTestOptions resolveOptions() {
+        AutoTestOptions defaults = new AutoTestOptions(
+                DEFAULT_ERROR_SNIPPET_CHARS,
+                DEFAULT_LOG_TAIL_CHARS,
+                DEFAULT_MAX_ERROR_CONTEXT_CHARS
+        );
+
+        if (appConfig == null || appConfig.getSkills() == null) {
+            return defaults;
+        }
+
+        for (AppConfig.SkillConfig skillConfig : appConfig.getSkills()) {
+            if (skillConfig == null || skillConfig.getName() == null || !"autotest".equalsIgnoreCase(skillConfig.getName())) {
+                continue;
+            }
+            Map<String, Object> config = skillConfig.getConfig();
+            if (config == null || config.isEmpty()) {
+                return defaults;
+            }
+
+            return new AutoTestOptions(
+                    intConfig(config.get("errorSnippetChars"), defaults.errorSnippetChars),
+                    intConfig(config.get("logTailChars"), defaults.logTailChars),
+                    intConfig(config.get("maxErrorContextChars"), defaults.maxErrorContextChars)
+            );
+        }
+        return defaults;
+    }
+
+    private int intConfig(Object value, int defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number number) {
+            return Math.max(256, number.intValue());
+        }
+        try {
+            return Math.max(256, Integer.parseInt(String.valueOf(value).trim()));
+        } catch (Exception ignored) {
+            return defaultValue;
+        }
+    }
+
+    private static class AutoTestOptions {
+        private final int errorSnippetChars;
+        private final int logTailChars;
+        private final int maxErrorContextChars;
+
+        private AutoTestOptions(int errorSnippetChars, int logTailChars, int maxErrorContextChars) {
+            this.errorSnippetChars = errorSnippetChars;
+            this.logTailChars = logTailChars;
+            this.maxErrorContextChars = maxErrorContextChars;
+        }
     }
 }
 
