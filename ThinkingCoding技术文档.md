@@ -38,20 +38,24 @@ ThinkingCoding 是一个**企业级 AI 编程助手 CLI 工具**，基于 Model 
 | **HTTP客户端** | OkHttp | 高性能HTTP通信 |
 
 ### 1.3 项目结构全景图
-
-```
+`	ext
 ThinkingCoding/
 ├── src/main/java/com/thinkingcoding/
-│   ├── ThinkingCodingCLI.java          # 应用入口（main函数）
-│   │
+│   ├── ThinkingCodingCLI.java         # 应用入口（main函数）
 │   ├── cli/                           # 命令层（Command Layer）
-│   │   ├── ThinkingCodingCommand.java  # 主命令（交互模式、单次提示、会话管理）
+│   │   ├── ThinkingCodingCommand.java # 主命令（交互模式、单次提示、会话管理）
 │   │   ├── SessionCommand.java        # 会话子命令（list、load、delete）
 │   │   ├── ConfigCommand.java         # 配置子命令（show、set、reset）
-│   │   └── MCPCommand.java            # MCP子命令（list、connect、disconnect）
-│   │
+│   │   ├── MCPCommand.java            # MCP子命令（list、connect、disconnect）
+│   │   └── SkillCommand.java          # 技能子命令（run、list）
+│   ├── config/                        # 配置管理层（Config Layer）
+│   │   ├── AppConfig.java             # 核心配置实体
+│   │   ├── ConfigLoader.java          # 配置加载器（YAML解析）
+│   │   ├── ConfigManager.java         # 配置管理器
+│   │   ├── MCPConfig.java             # MCP配置实体
+│   │   └── MCPServerConfig.java       # MCP服务器配置
 │   ├── core/                          # 核心逻辑层（Core Layer）
-│   │   ├── ThinkingCodingContext.java  # 全局上下文容器（依赖注入）
+│   │   ├── ThinkingCodingContext.java # 全局上下文容器（依赖注入）
 │   │   ├── AgentLoop.java             # AI Agent 主循环（对话 + 工具调用）
 │   │   ├── MessageHandler.java        # 消息处理器（流式输出）
 │   │   ├── StreamingOutput.java       # 流式输出管理
@@ -59,79 +63,43 @@ ThinkingCoding/
 │   │   ├── OptionManager.java         # 选项管理（AI提供多选项）
 │   │   ├── ToolExecutionConfirmation.java # 工具执行确认
 │   │   └── DirectCommandExecutor.java # 直接命令执行器
-│   │
+│   ├── mcp/                           # MCP协议集成层（MCP Layer）
+│   │   ├── MCPClient.java             # MCP客户端
+│   │   ├── MCPService.java            # MCP服务管理
+│   │   ├── MCPToolAdapter.java        # MCP工具适配器
+│   │   ├── MCPToolManager.java        # MCP工具管理器
+│   │   └── model/                     # MCP数据模型
+│   ├── model/                         # 全局数据模型（Model Layer）
 │   ├── service/                       # 服务层（Service Layer）
 │   │   ├── AIService.java             # AI服务接口
-│   │   ├── LangChainService.java      # LangChain4j实现（DeepSeek集成）
-│   │   ├── ContextManager.java        # 上下文管理器（历史窗口、Token控制）
-│   │   ├── SessionService.java        # 会话管理服务（持久化、加载）
-│   │   └── PerformanceMonitor.java    # 性能监控（Token统计、执行时间）
-│   │
+│   │   ├── LangChainService.java      # LangChain4j实现
+│   │   ├── ContextManager.java        # 上下文管理器
+│   │   ├── SessionService.java        # 会话管理服务
+│   │   ├── PerformanceMonitor.java    # 性能监控
+│   │   ├── RAGService.java            # RAG检索增强生成服务
+│   │   └── rag/                       # RAG向量库适配器与查询逻辑
+│   ├── skill/                         # 技能抽象层（Skill Layer）
+│   │   ├── Skill.java                 # 技能接口
+│   │   ├── SkillExecutionContext.java # 技能执行上下文
+│   │   ├── SkillRegistry.java         # 技能注册表
+│   │   ├── SkillResult.java           # 技能执行结果
+│   │   └── autotest/                  # 自动测试技能实现（AutoTestSkill）
 │   ├── tools/                         # 工具层（Tool Layer）
 │   │   ├── BaseTool.java              # 工具抽象基类
-│   │   ├── ToolRegistry.java          # 工具注册表（统一管理）
+│   │   ├── ToolRegistry.java          # 工具注册表
 │   │   ├── ToolProvider.java          # 工具提供者接口
-│   │   ├── file/
-│   │   │   └── FileManagerTool.java   # 文件管理工具（读写、目录操作）
-│   │   ├── exec/
-│   │   │   ├── CommandExecutorTool.java # 命令执行工具（Shell命令）
-│   │   │   └── CodeExecutorTool.java    # 代码执行工具（Java/Python/JS）
-│   │   └── search/
-│   │       └── GrepSearchTool.java    # 文本搜索工具（grep功能）
-│   │
-│   ├── mcp/                           # MCP层（MCP Protocol Layer）
-│   │   ├── MCPService.java            # MCP服务管理（多服务器连接）
-│   │   ├── MCPClient.java             # MCP客户端（JSON-RPC通信）
-│   │   ├── MCPToolManager.java        # MCP工具管理器
-│   │   ├── MCPToolAdapter.java        # MCP工具适配器（转BaseTool）
-│   │   └── model/                     # MCP协议数据模型
-│   │       ├── MCPTool.java           # MCP工具模型
-│   │       ├── MCPRequest.java        # MCP请求模型
-│   │       ├── MCPResponse.java       # MCP响应模型
-│   │       ├── MCPError.java          # MCP错误模型
-│   │       └── InputSchema.java       # 输入Schema模型
-│   │
-│   ├── config/                        # 配置层（Configuration Layer）
-│   │   ├── ConfigManager.java         # 配置管理器（单例模式）
-│   │   ├── ConfigLoader.java          # 配置加载器（YAML解析）
-│   │   ├── AppConfig.java             # 应用配置模型
-│   │   ├── MCPConfig.java             # MCP配置模型
-│   │   └── MCPServerConfig.java       # MCP服务器配置
-│   │
-│   ├── model/                         # 通用数据模型层（Model Layer）
-│   │   ├── ChatMessage.java           # 聊天消息模型
-│   │   ├── ToolCall.java              # 工具调用模型
-│   │   ├── ToolExecution.java         # 工具执行记录
-│   │   ├── ToolResult.java            # 工具执行结果
-│   │   ├── SessionData.java           # 会话数据模型
-│   │   └── ModelConfig.java           # 模型配置
-│   │
-│   ├── ui/                            # UI层（User Interface Layer）
-│   │   ├── ThinkingCodingUI.java       # UI主类（终端管理）
-│   │   ├── AnsiColors.java            # ANSI颜色定义
+│   │   ├── SemanticSearchTool.java    # 语义搜索工具
+│   │   ├── file/                      # 文件管理（FileManagerTool）
+│   │   ├── exec/                      # 命令/代码执行
+│   │   └── search/                    # 文本搜索（GrepSearchTool）
+│   ├── ui/                            # 终端UI层（UI Layer）
+│   │   ├── ThinkingCodingUI.java      # JLine3 UI核心
 │   │   ├── TerminalManager.java       # 终端管理器
-│   │   ├── component/
-│   │   │   ├── ChatRenderer.java      # 聊天渲染器
-│   │   │   ├── ToolDisplay.java       # 工具展示器
-│   │   │   ├── InputHandler.java      # 输入处理器
-│   │   │   ├── StatusBar.java         # 状态栏
-│   │   │   └── ProgressIndicator.java # 进度指示器
-│   │   └── themes/
-│   │       └── ColorScheme.java       # 颜色方案
-│   │
-│   └── util/                          # 工具类层（Utility Layer）
-│       ├── JsonUtils.java             # JSON工具
-│       ├── FileUtils.java             # 文件工具
-│       ├── StreamUtils.java           # 流工具
-│       └── ConsoleUtils.java          # 控制台工具
-│
-├── src/main/resources/
-│   ├── config.yaml                    # 主配置文件
-│   └── thinkingcoding-banner.txt       # 启动Banner
-│
-└── sessions/                          # 会话存储目录
-    └── *.json                         # 会话文件（按UUID命名）
-```
+│   │   ├── AnsiColors.java            # ANSI颜色定义
+│   │   ├── component/                 # UI组件
+│   │   └── themes/                    # 颜色主题（ColorScheme）
+│   └── util/                          # 工具类（Utility Layer）
+`
 
 ### 1.4 核心逻辑调用链路
 
@@ -455,7 +423,7 @@ AI 解释结果
 |------|---------|------|
 | **内置工具** | FileManager、CommandExecutor | Java 直接实现 |
 | **MCP工具** | GitHub、Database、Filesystem | 通过 MCP 协议连接 |
-| **自定义工具** | CodeExecutor、GrepSearch | 项目特定工具 |
+| **自定义工具** | CodeExecutor、GrepSearch、SemanticSearch | 项目特定工具 |
 
 ---
 
