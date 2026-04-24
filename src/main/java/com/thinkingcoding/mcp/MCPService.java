@@ -82,10 +82,19 @@ public class MCPService {
                     try {
                         // 🔥 修复：正确解析JSON参数
                         Map<String, Object> parameters = parseInputToParameters(input);
+                        
+                        // 🔥 增强：记录工具调用信息
+                        log.info("🔧 执行MCP工具 [{}]: {} - 参数: {}", serverName, mcpTool.getName(), parameters);
+                        
                         Object result = callTool(serverName, mcpTool.getName(), parameters);
+                        
+                        log.info("✅ MCP工具执行成功: {}", mcpTool.getName());
                         return success(result != null ? result.toString() : "执行成功");
                     } catch (Exception e) {
-                        return error("工具执行失败: " + e.getMessage());
+                        // 🔥 增强：提供详细的错误信息和排查建议
+                        String errorMsg = buildDetailedErrorMessage(serverName, mcpTool.getName(), e);
+                        log.error("❌ {}", errorMsg);
+                        return error(errorMsg);
                     }
                 }
 
@@ -107,6 +116,43 @@ public class MCPService {
             baseTools.add(baseTool);
         }
         return baseTools;
+    }
+
+    /**
+     * 🔥 新增：构建详细的错误消息，包含排查建议
+     */
+    private String buildDetailedErrorMessage(String serverName, String toolName, Exception e) {
+        StringBuilder errorMsg = new StringBuilder();
+        errorMsg.append("MCP工具执行失败 [").append(serverName).append("/").append(toolName).append("]: ");
+        errorMsg.append(getRootMessage(e));
+        
+        // 🔥 根据错误类型提供排查建议
+        String errorMessage = getRootMessage(e).toLowerCase(Locale.ROOT);
+        
+        if (errorMessage.contains("fetch failed")) {
+            errorMsg.append("\n\n💡 可能原因和解决方案：");
+            errorMsg.append("\n1. GitHub Token 未配置或无效");
+            errorMsg.append("\n   - 检查 MCP 服务器启动参数是否包含 --token");
+            errorMsg.append("\n   - 确认 Token 有正确的权限（repo, user 等）");
+            errorMsg.append("\n2. 网络连接问题");
+            errorMsg.append("\n   - 检查是否可以访问 https://api.github.com");
+            errorMsg.append("\n   - 如有代理，请确认代理设置正确");
+            errorMsg.append("\n3. 参数格式错误");
+            errorMsg.append("\n   - 检查是否提供了所有必需参数");
+            errorMsg.append("\n   - 确认参数名称和类型正确");
+        } else if (errorMessage.contains("token") || errorMessage.contains("auth")) {
+            errorMsg.append("\n\n💡 认证失败，请检查：");
+            errorMsg.append("\n- GitHub Token 是否正确配置");
+            errorMsg.append("\n- Token 是否过期或被撤销");
+            errorMsg.append("\n- Token 是否有足够的权限");
+        } else if (errorMessage.contains("timeout") || errorMessage.contains("超时")) {
+            errorMsg.append("\n\n💡 请求超时，请检查：");
+            errorMsg.append("\n- 网络连接是否正常");
+            errorMsg.append("\n- GitHub API 是否可访问");
+            errorMsg.append("\n- 是否需要配置代理");
+        }
+        
+        return errorMsg.toString();
     }
 
     /**
@@ -146,8 +192,16 @@ public class MCPService {
             return client.callTool(toolName, arguments);
         } catch (Exception e) {
             log.error("调用工具失败: {}.{}", serverName, toolName, e);
-            throw new RuntimeException("工具调用失败: " + e.getMessage(), e);
+            throw new RuntimeException("工具调用失败: " + getRootMessage(e), e);
         }
+    }
+
+    private String getRootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current.getMessage() != null ? current.getMessage() : current.toString();
     }
 
 
