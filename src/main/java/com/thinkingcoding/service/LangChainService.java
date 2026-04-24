@@ -269,16 +269,35 @@ public class LangChainService implements AIService {
         }
 
         // 兼容 CLI 既有展示逻辑，暴露语义化别名工具。
+        // 🔥 修复：添加前检查是否已存在同名工具，避免重复
         if (seen.contains("file_manager")) {
-            specifications.add(buildWriteFileAliasSpecification());
-            specifications.add(buildReadFileAliasSpecification());
-            specifications.add(buildListDirectoryAliasSpecification());
+            addAliasIfNotExists(specifications, seen, "write_file", 
+                    buildWriteFileAliasSpecification());
+            addAliasIfNotExists(specifications, seen, "read_file", 
+                    buildReadFileAliasSpecification());
+            addAliasIfNotExists(specifications, seen, "list_directory", 
+                    buildListDirectoryAliasSpecification());
         }
         if (seen.contains("command_executor")) {
-            specifications.add(buildBashAliasSpecification());
+            addAliasIfNotExists(specifications, seen, "bash", 
+                    buildBashAliasSpecification());
         }
 
         return specifications;
+    }
+
+    /**
+     * 🔥 新增：仅在工具名称不存在时添加别名工具
+     */
+    private void addAliasIfNotExists(List<ToolSpecification> specifications, 
+                                     Set<String> seen, 
+                                     String aliasName, 
+                                     ToolSpecification aliasSpec) {
+        if (!seen.contains(aliasName)) {
+            specifications.add(aliasSpec);
+            seen.add(aliasName);
+        }
+        // 静默跳过，避免重复
     }
 
     private ToolSpecification buildWriteFileAliasSpecification() {
