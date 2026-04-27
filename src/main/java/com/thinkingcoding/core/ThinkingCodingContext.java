@@ -72,7 +72,7 @@ public class ThinkingCodingContext {
         // 能力层初始化,创建工具注册表
         ToolRegistry toolRegistry = new ToolRegistry(appConfig);
 
-        // 🔥 创建 MCP 服务
+        //  创建 MCP 服务
         MCPService mcpService = new MCPService(toolRegistry);
         MCPToolManager mcpToolManager = new MCPToolManager(mcpService, mcpConfig);
 

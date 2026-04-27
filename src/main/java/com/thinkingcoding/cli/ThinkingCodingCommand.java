@@ -1,5 +1,7 @@
 package com.thinkingcoding.cli;
 
+import com.thinkingcoding.agentloop.v2.orchestrator.AgentConfig;
+import com.thinkingcoding.agentloop.v2.orchestrator.AgentOrchestrator;
 import com.thinkingcoding.core.AgentLoop;
 import com.thinkingcoding.core.DirectCommandExecutor;
 import com.thinkingcoding.core.ThinkingCodingContext;
@@ -33,6 +35,7 @@ public class ThinkingCodingCommand implements Callable<Integer> {
 
     // 添加会话管理字段
     private AgentLoop currentAgentLoop;
+    private AgentOrchestrator currentAgentOrchestrator;  // 🔥 V2 AgentLoop
     private String currentSessionId;
 
     // 直接命令执行器
@@ -74,6 +77,16 @@ public class ThinkingCodingCommand implements Callable<Integer> {
 
     @CommandLine.Option(names = {"--mcp-predefined"}, description = "List predefined MCP tools")
     private boolean mcpPredefined;
+
+    // 🔥 V2 AgentLoop 选项
+    @CommandLine.Option(names = {"--agent-loop"}, description = "AgentLoop version: legacy|v2 (default: v2)")
+    private String agentLoopVersion = "v2";
+
+    @CommandLine.Option(names = {"--max-react-steps"}, description = "Max ReAct steps per turn (V2 only, default: 6)")
+    private int maxReactSteps = 6;
+
+    @CommandLine.Option(names = {"--auto-approve"}, description = "Enable auto-approve mode for tools (V2 only)")
+    private boolean autoApprove = false;
 
     public ThinkingCodingCommand(ThinkingCodingContext context) {
         this.context = context;
@@ -164,8 +177,7 @@ public class ThinkingCodingCommand implements Callable<Integer> {
             状态管理：维护对话状态和上下文
 
             错误处理：处理整个流程中的异常情况*/
-            currentAgentLoop = new AgentLoop(context, currentSessionId, modelToUse);
-            currentAgentLoop.loadHistory(history);
+            createAgentLoop(modelToUse, history);
 
             // 单次对话模式
             if (prompt != null) {
@@ -175,8 +187,12 @@ public class ThinkingCodingCommand implements Callable<Integer> {
                     ChatMessage userMessage = new ChatMessage("user", prompt);
                     ui.displayUserMessage(userMessage);
 
-                    // 处理AI响应，协调整个处理流程
-                    currentAgentLoop.processInput(prompt);
+                    // 🔥 处理AI响应，根据版本选择不同方法
+                    if ("v2".equalsIgnoreCase(agentLoopVersion) && currentAgentOrchestrator != null) {
+                        currentAgentOrchestrator.onUserInput(prompt);
+                    } else {
+                        currentAgentLoop.processInput(prompt);
+                    }
 
                     return 0;
                 } catch (Exception e) {
@@ -189,7 +205,7 @@ public class ThinkingCodingCommand implements Callable<Integer> {
             // Picocli自动解析命令行参数并注入到字段中
             // 交互式模式
             if (interactive) {
-                return startInteractiveMode(currentAgentLoop, ui);
+                return startInteractiveMode(ui);
             }
 
             return 0;
@@ -246,7 +262,18 @@ public class ThinkingCodingCommand implements Callable<Integer> {
         ui.getTerminal().writer().flush();
     }
 
-    private Integer startInteractiveMode(AgentLoop agentLoop, ThinkingCodingUI ui) {
+    private Integer startInteractiveMode(ThinkingCodingUI ui) {
+        // 🔥 显示当前使用的 AgentLoop 版本
+        if ("v2".equalsIgnoreCase(agentLoopVersion)) {
+            ui.displaySuccess("✅ AgentLoop V2 已启用");
+            ui.displayInfo("   架构: Plan → Execute + ReAct → Steering");
+            ui.displayInfo("   - Max ReAct Steps: " + maxReactSteps);
+            ui.displayInfo("   - Auto Approve: " + (autoApprove ? "ON" : "OFF"));
+            ui.displayInfo("   - 支持命令: /stop, /cancel, /auto-approve-on/off");
+        } else {
+            ui.displayInfo("使用 Legacy AgentLoop");
+        }
+        
         ui.displayInfo("Entering interactive mode. Type 'exit' to quit, 'help' for commands.");
 
         while (true) {
@@ -288,6 +315,13 @@ public class ThinkingCodingCommand implements Callable<Integer> {
                     continue;
                 }
 
+                // 🔥 V2 Steering 命令
+                if ("v2".equalsIgnoreCase(agentLoopVersion) && currentAgentOrchestrator != null) {
+                    if (handleV2SteeringCommand(trimmedInput)) {
+                        continue;
+                    }
+                }
+
                 // 🔧 直接命令帮助
                 if (trimmedInput.equalsIgnoreCase("/commands") || trimmedInput.equalsIgnoreCase("/cmds")) {
                     directCommandExecutor.listSupportedCommands();
@@ -308,12 +342,16 @@ public class ThinkingCodingCommand implements Callable<Integer> {
 
                 // 🚨 关键修复：检查是否是参数格式
                 if (isParameterFormat(trimmedInput)) {
-                    handleParameterInInteractiveMode(trimmedInput, agentLoop);
+                    handleParameterInInteractiveMode(trimmedInput);
                     continue;
                 }
 
-                // 处理普通对话
-                agentLoop.processInput(trimmedInput);
+                // 🔥 处理普通对话，根据版本选择不同方法
+                if ("v2".equalsIgnoreCase(agentLoopVersion) && currentAgentOrchestrator != null) {
+                    currentAgentOrchestrator.onUserInput(trimmedInput);
+                } else {
+                    currentAgentLoop.processInput(trimmedInput);
+                }
 
             } catch (Exception e) {
                 ui.displayError("Error: " + e.getMessage());
@@ -325,6 +363,82 @@ public class ThinkingCodingCommand implements Callable<Integer> {
 
 // 删除 handleInternalCommand 方法，因为我们已经直接处理了 MCP 命令
 // 删除 handleSinglePrompt 方法，因为单次提示模式已经在 call() 方法中处理了
+
+    /**
+     * 🔥 创建 AgentLoop（支持 legacy/v2 切换）
+     */
+    private void createAgentLoop(String modelToUse, List<ChatMessage> history) {
+        ThinkingCodingUI ui = context.getUi();
+        
+        if ("v2".equalsIgnoreCase(agentLoopVersion)) {
+            // 启用 V2
+            try {
+                // 配置 V2
+                AgentConfig config = AgentConfig.defaultConfig();
+                config.setEnabled(true);
+                config.setMaxReActStepsPerTurn(maxReactSteps);
+                config.setAutoApproveDefault(autoApprove);
+                
+                // 创建 V2 AgentOrchestrator
+                currentAgentOrchestrator = new AgentOrchestrator(context, currentSessionId, modelToUse, config);
+                currentAgentOrchestrator.loadHistory(history);
+                
+                ui.displaySuccess("✅ AgentLoop V2 初始化成功");
+            } catch (Exception e) {
+                ui.displayError("❌ V2 初始化失败: " + e.getMessage());
+                ui.displayWarning("⚠️  回退到 Legacy AgentLoop");
+                
+                // 回退到 Legacy
+                currentAgentLoop = new AgentLoop(context, currentSessionId, modelToUse);
+                currentAgentLoop.loadHistory(history);
+            }
+        } else {
+            // 使用 Legacy
+            currentAgentLoop = new AgentLoop(context, currentSessionId, modelToUse);
+            currentAgentLoop.loadHistory(history);
+        }
+    }
+
+    /**
+     * 🔥 处理 V2 Steering 命令
+     */
+    private boolean handleV2SteeringCommand(String input) {
+        if (currentAgentOrchestrator == null) {
+            return false;
+        }
+        
+        String command = input.toLowerCase();
+        ThinkingCodingUI ui = context.getUi();
+        
+        switch (command) {
+            case "/stop":
+                currentAgentOrchestrator.onSteeringCommand(
+                    com.thinkingcoding.agentloop.v2.steer.SteeringCommand.STOP_GENERATION
+                );
+                ui.displayInfo("⏸️  已停止生成");
+                return true;
+                
+            case "/cancel":
+                currentAgentOrchestrator.onSteeringCommand(
+                    com.thinkingcoding.agentloop.v2.steer.SteeringCommand.CANCEL_TURN
+                );
+                ui.displayInfo("⚠️  回合已取消");
+                return true;
+                
+            case "/auto-approve-on":
+                currentAgentOrchestrator.setAutoApprove(true);
+                ui.displaySuccess("✅ Auto-approve 已开启");
+                return true;
+                
+            case "/auto-approve-off":
+                currentAgentOrchestrator.setAutoApprove(false);
+                ui.displaySuccess("✅ Auto-approve 已关闭");
+                return true;
+                
+            default:
+                return false;  // 不是 steering 命令
+        }
+    }
 
     /**
      * 🔥 处理 MCP 相关命令
@@ -410,7 +524,7 @@ public class ThinkingCodingCommand implements Callable<Integer> {
     /**
      * 在交互模式中处理参数命令
      */
-    private void handleParameterInInteractiveMode(String parameter, AgentLoop currentAgentLoop) {
+    private void handleParameterInInteractiveMode(String parameter) {
         ThinkingCodingUI ui = context.getUi();
         String[] args = parameter.split("\\s+");
 
@@ -422,13 +536,13 @@ public class ThinkingCodingCommand implements Callable<Integer> {
 
             case "-c":
             case "--continue":
-                handleContinueInInteractive(currentAgentLoop);
+                handleContinueInInteractive();
                 break;
 
             case "-S":
             case "--session":
                 if (args.length > 1) {
-                    handleLoadSession(args[1], currentAgentLoop);
+                    handleLoadSession(args[1]);
                 } else {
                     ui.displayError("Usage: -S <session-id>");
                 }
@@ -446,7 +560,7 @@ public class ThinkingCodingCommand implements Callable<Integer> {
                     }
 
                     if (!prompt.isEmpty()) {
-                        handleSinglePromptInInteractive(prompt, currentAgentLoop);
+                        handleSinglePromptInInteractive(prompt);
                     } else {
                         ui.displayError("Usage: -p \"your prompt\"");
                     }
@@ -486,25 +600,31 @@ public class ThinkingCodingCommand implements Callable<Integer> {
     /**
      * 在交互模式中继续上次会话
      */
-    private void handleContinueInInteractive(AgentLoop currentAgentLoop) {
+    private void handleContinueInInteractive() {
         ThinkingCodingUI ui = context.getUi();
         try {
-            //Command从Context获取服务
+            //Command从 Context获取服务
             String latestSessionId = context.getSessionService().getLatestSessionId();
             if (latestSessionId != null) {
                 List<ChatMessage> history = context.getSessionService().loadSession(latestSessionId);
-
+    
                 // 🚨 关键修复：过滤空消息
                 List<ChatMessage> filteredHistory = history.stream()
                         .filter(msg -> msg != null &&
                                 msg.getContent() != null &&
                                 !msg.getContent().trim().isEmpty())
                         .collect(Collectors.toList());
-
-                currentAgentLoop.loadHistory(filteredHistory);
+    
+                // 🔥 根据版本加载历史
+                if ("v2".equalsIgnoreCase(agentLoopVersion) && currentAgentOrchestrator != null) {
+                    currentAgentOrchestrator.loadHistory(filteredHistory);
+                } else if (currentAgentLoop != null) {
+                    currentAgentLoop.loadHistory(filteredHistory);
+                }
+                    
                 currentSessionId = latestSessionId;
                 ui.displaySuccess("Continued from session: " + latestSessionId);
-
+    
                 // 显示加载的消息数量
                 ui.displayInfo("Loaded " + filteredHistory.size() + " messages from history");
             } else {
@@ -514,30 +634,43 @@ public class ThinkingCodingCommand implements Callable<Integer> {
             ui.displayError("Failed to continue session: " + e.getMessage());
         }
     }
-
+    
     /**
      * 在交互模式中加载指定会话
      */
-    private void handleLoadSession(String sessionId, AgentLoop currentAgentLoop) {
+    private void handleLoadSession(String sessionId) {
         ThinkingCodingUI ui = context.getUi();
         try {
             List<ChatMessage> history = context.getSessionService().loadSession(sessionId);
-            currentAgentLoop.loadHistory(history);
+                
+            // 🔥 根据版本加载历史
+            if ("v2".equalsIgnoreCase(agentLoopVersion) && currentAgentOrchestrator != null) {
+                currentAgentOrchestrator.loadHistory(history);
+            } else if (currentAgentLoop != null) {
+                currentAgentLoop.loadHistory(history);
+            }
+                
             currentSessionId = sessionId;
             ui.displaySuccess("Loaded session: " + sessionId);
         } catch (Exception e) {
             ui.displayError("Failed to load session: " + e.getMessage());
         }
     }
-
+    
     /**
      * 在交互模式中执行单次提示
      */
-    private void handleSinglePromptInInteractive(String prompt, AgentLoop agentLoop) {
+    private void handleSinglePromptInInteractive(String prompt) {
         ThinkingCodingUI ui = context.getUi();
         try {
             ui.displayUserMessage(new ChatMessage("user", prompt));
-            agentLoop.processInput(prompt);
+                
+            // 🔥 根据版本处理
+            if ("v2".equalsIgnoreCase(agentLoopVersion) && currentAgentOrchestrator != null) {
+                currentAgentOrchestrator.onUserInput(prompt);
+            } else if (currentAgentLoop != null) {
+                currentAgentLoop.processInput(prompt);
+            }
         } catch (Exception e) {
             ui.displayError("Failed to process prompt: " + e.getMessage());
         }
