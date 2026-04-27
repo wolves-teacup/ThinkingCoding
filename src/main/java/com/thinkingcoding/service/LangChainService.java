@@ -95,6 +95,7 @@ public class LangChainService implements AIService {
 
     @Override
     public List<ChatMessage> streamingChat(String input, List<ChatMessage> history, String modelName) {
+        // 前置校验：确保消息处理器和流式模型已初始化
         if (messageHandler == null) {
             throw new IllegalStateException("Message handler not set");
         }
@@ -103,6 +104,7 @@ public class LangChainService implements AIService {
             throw new IllegalStateException("DeepSeek model not initialized. Please check your configuration.");
         }
 
+        // 初始化生成状态标志
         isGenerating = true;
         shouldStop = false;
 
@@ -110,6 +112,7 @@ public class LangChainService implements AIService {
         final CompletableFuture<Void> completionFuture = new CompletableFuture<>();
 
         try {
+            // 准备对话消息和工具规格定义
             List<dev.langchain4j.data.message.ChatMessage> messages = prepareMessages(input, history);
             List<ToolSpecification> toolSpecifications = buildToolSpecifications();
 
@@ -118,7 +121,11 @@ public class LangChainService implements AIService {
                     .toolSpecifications(toolSpecifications)
                     .build();
 
+            // 执行流式对话请求，注册响应处理器
             streamingChatModel.chat(request, new StreamingChatResponseHandler() {
+                /**
+                 * 处理AI响应的部分片段（Token级别）
+                 */
                 @Override
                 public void onPartialResponse(String token) {
                     if (shouldStop) {
@@ -128,9 +135,13 @@ public class LangChainService implements AIService {
                     messageHandler.accept(new ChatMessage("assistant", token));
                 }
 
+                /**
+                 * 处理AI响应完成事件，提取完整文本和工具调用
+                 */
                 @Override
                 public void onCompleteResponse(ChatResponse chatResponse) {
                     try {
+                        // 如果用户主动停止生成，添加截断标记
                         if (shouldStop && !fullResponse.isEmpty()) {
                             ChatMessage truncatedMessage = new ChatMessage("assistant",
                                     fullResponse + "\n\n💡 [生成已被用户停止]");
@@ -138,11 +149,13 @@ public class LangChainService implements AIService {
                             return;
                         }
 
+                        // 将完整的AI响应添加到历史记录
                         String assistantText = fullResponse.toString().trim();
                         if (!assistantText.isEmpty()) {
                             history.add(new ChatMessage("assistant", assistantText));
                         }
 
+                        // 提取并处理工具调用请求
                         List<ToolCall> toolCalls = extractToolCalls(chatResponse);
                         if (toolCallHandler != null && !toolCalls.isEmpty()) {
                             // 当前 AgentLoop 只缓存一个待执行调用，这里按顺序触发并由上层取最后一个。
@@ -153,12 +166,16 @@ public class LangChainService implements AIService {
 
                         System.out.println();
                     } finally {
+                        // 重置生成状态并完成Future
                         isGenerating = false;
                         shouldStop = false;
                         completionFuture.complete(null);
                     }
                 }
 
+                /**
+                 * 处理API调用错误，提供友好的错误提示
+                 */
                 @Override
                 public void onError(Throwable error) {
                     try {
@@ -168,6 +185,7 @@ public class LangChainService implements AIService {
                         messageHandler.accept(errorMessage);
                         history.add(errorMessage);
                     } finally {
+                        // 重置生成状态并异常完成Future
                         isGenerating = false;
                         shouldStop = false;
                         completionFuture.completeExceptionally(error);
@@ -175,6 +193,7 @@ public class LangChainService implements AIService {
                 }
             });
 
+            // 等待流式响应完成，设置5分钟超时
             try {
                 completionFuture.get(5, TimeUnit.MINUTES);
             } catch (java.util.concurrent.TimeoutException e) {
@@ -185,6 +204,7 @@ public class LangChainService implements AIService {
             }
 
         } catch (Exception e) {
+            // 捕获服务层异常，重置状态并提供错误反馈
             isGenerating = false;
             shouldStop = false;
 
@@ -500,7 +520,7 @@ public class LangChainService implements AIService {
         };
     }
 
-    private List<dev.langchain4j.data.message.ChatMessage> prepareMessages(String input, List<ChatMessage> history) {
+    private List<dev.langchain4j.data.message.ChatMessage>  prepareMessages(String input, List<ChatMessage> history) {
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
 
         if (contextManager != null) {
