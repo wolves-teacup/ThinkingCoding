@@ -27,11 +27,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -67,12 +65,48 @@ public class LangChainService implements AIService {
 
     private void initializeChatModel() {
         try {
-            AppConfig.ModelConfig modelConfig = appConfig.getModelConfig(appConfig.getDefaultModel());
-            if (modelConfig != null) {
-                this.streamingChatModel = createDeepSeekModel(modelConfig);
+            String configuredDefaultModel = appConfig.getDefaultModel();
+            AppConfig.ModelConfig modelConfig = appConfig.getModelConfig(configuredDefaultModel);
+            if (modelConfig == null) {
+                if (appConfig.getModels() != null && !appConfig.getModels().isEmpty()) {
+                    String fallbackModelKey = appConfig.getModels().keySet().iterator().next();
+                    modelConfig = appConfig.getModelConfig(fallbackModelKey);
+                    System.err.println("⚠️  defaultModel '" + configuredDefaultModel
+                            + "' 未找到，已回退到: " + fallbackModelKey);
+                } else {
+                    System.err.println("❌ 错误：未找到默认模型配置 '" + configuredDefaultModel + "'");
+                    System.err.println("   请检查 config.yaml 中的 models 配置和 defaultModel 设置");
+                    return;
+                }
+            }
+            
+            // 验证必要配置
+            if (modelConfig.getApiKey() == null || modelConfig.getApiKey().trim().isEmpty()) {
+                System.err.println("❌ 错误：模型 '" + modelConfig.getName() + "' 的 API Key 未配置");
+                System.err.println("   请在 config.yaml 中设置正确的 apiKey");
+                return;
+            }
+            
+            if (modelConfig.getBaseURL() == null || modelConfig.getBaseURL().trim().isEmpty()) {
+                System.err.println("❌ 错误：模型 '" + modelConfig.getName() + "' 的 Base URL 未配置");
+                return;
+            }
+            
+            System.out.println("🔧 正在初始化模型: " + modelConfig.getName());
+            System.out.println("   Base URL: " + modelConfig.getBaseURL());
+            System.out.println("   API Key: " + (modelConfig.getApiKey().length() > 8 ? 
+                modelConfig.getApiKey().substring(0, 8) + "..." : "***"));
+            
+            this.streamingChatModel = createDeepSeekModel(modelConfig);
+            
+            if (this.streamingChatModel != null) {
+                System.out.println("✅ 模型初始化成功: " + modelConfig.getName());
+            } else {
+                System.err.println("❌ 模型初始化失败：createDeepSeekModel 返回 null");
             }
         } catch (Exception e) {
-            System.err.println("初始化模型失败: " + e.getMessage());
+            System.err.println("❌ 初始化模型时发生异常: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
@@ -226,37 +260,10 @@ public class LangChainService implements AIService {
         List<ToolCall> toolCalls = new ArrayList<>();
         for (ToolExecutionRequest request : chatResponse.aiMessage().toolExecutionRequests()) {
             Map<String, Object> arguments = parseToolArguments(request.arguments());
-            toolCalls.add(normalizeToolCall(request.name(), arguments));
+            // 严格原生 Tool Calling：保留模型返回的工具名，不做别名转换。
+            toolCalls.add(new ToolCall(request.name(), arguments, null, false, 0, true));
         }
         return toolCalls;
-    }
-
-    private ToolCall normalizeToolCall(String requestToolName, Map<String, Object> rawArguments) {
-        String toolName = requestToolName;
-        Map<String, Object> arguments = new HashMap<>(rawArguments);
-
-        if ("file_manager".equals(requestToolName)) {
-            String command = getString(arguments, "command");
-            if ("write".equalsIgnoreCase(command)) {
-                toolName = "write_file";
-                arguments.remove("command");
-            } else if ("read".equalsIgnoreCase(command)) {
-                toolName = "read_file";
-                arguments.remove("command");
-            } else if ("list".equalsIgnoreCase(command)) {
-                toolName = "list_directory";
-                arguments.remove("command");
-            }
-        } else if ("command_executor".equals(requestToolName) && !arguments.containsKey("command") && arguments.containsKey("input")) {
-            arguments.put("command", String.valueOf(arguments.get("input")));
-        }
-
-        return new ToolCall(toolName, arguments, null, false, 0, true);
-    }
-
-    private String getString(Map<String, Object> arguments, String key) {
-        Object value = arguments.get(key);
-        return value == null ? null : String.valueOf(value);
     }
 
     private Map<String, Object> parseToolArguments(String arguments) {
@@ -276,7 +283,6 @@ public class LangChainService implements AIService {
 
     private List<ToolSpecification> buildToolSpecifications() {
         List<ToolSpecification> specifications = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
 
         for (BaseTool tool : toolRegistry.getAllTools()) {
             ToolSpecification specification = ToolSpecification.builder()
@@ -285,97 +291,11 @@ public class LangChainService implements AIService {
                     .parameters(resolveToolSchema(tool))
                     .build();
             specifications.add(specification);
-            seen.add(tool.getName());
-        }
-
-        // 兼容 CLI 既有展示逻辑，暴露语义化别名工具。
-        // 🔥 修复：添加前检查是否已存在同名工具，避免重复
-        if (seen.contains("file_manager")) {
-            addAliasIfNotExists(specifications, seen, "write_file", 
-                    buildWriteFileAliasSpecification());
-            addAliasIfNotExists(specifications, seen, "read_file", 
-                    buildReadFileAliasSpecification());
-            addAliasIfNotExists(specifications, seen, "list_directory", 
-                    buildListDirectoryAliasSpecification());
-        }
-        if (seen.contains("command_executor")) {
-            addAliasIfNotExists(specifications, seen, "bash", 
-                    buildBashAliasSpecification());
         }
 
         return specifications;
     }
 
-    /**
-     * 🔥 新增：仅在工具名称不存在时添加别名工具
-     */
-    private void addAliasIfNotExists(List<ToolSpecification> specifications, 
-                                     Set<String> seen, 
-                                     String aliasName, 
-                                     ToolSpecification aliasSpec) {
-        if (!seen.contains(aliasName)) {
-            specifications.add(aliasSpec);
-            seen.add(aliasName);
-        }
-        // 静默跳过，避免重复
-    }
-
-    private ToolSpecification buildWriteFileAliasSpecification() {
-        JsonObjectSchema parameters = JsonObjectSchema.builder()
-                .addStringProperty("path", "目标文件路径")
-                .addStringProperty("content", "要写入的完整内容")
-                .required("path", "content")
-                .additionalProperties(false)
-                .build();
-
-        return ToolSpecification.builder()
-                .name("write_file")
-                .description("写入或覆盖文件内容")
-                .parameters(parameters)
-                .build();
-    }
-
-    private ToolSpecification buildReadFileAliasSpecification() {
-        JsonObjectSchema parameters = JsonObjectSchema.builder()
-                .addStringProperty("path", "要读取的文件路径")
-                .required("path")
-                .additionalProperties(false)
-                .build();
-
-        return ToolSpecification.builder()
-                .name("read_file")
-                .description("读取文件内容")
-                .parameters(parameters)
-                .build();
-    }
-
-    private ToolSpecification buildListDirectoryAliasSpecification() {
-        JsonObjectSchema parameters = JsonObjectSchema.builder()
-                .addStringProperty("path", "要列出的目录路径")
-                .required("path")
-                .additionalProperties(false)
-                .build();
-
-        return ToolSpecification.builder()
-                .name("list_directory")
-                .description("列出目录中的文件和子目录")
-                .parameters(parameters)
-                .build();
-    }
-
-    private ToolSpecification buildBashAliasSpecification() {
-        JsonObjectSchema parameters = JsonObjectSchema.builder()
-                .addStringProperty("command", "要执行的系统命令")
-                .required("command")
-                .additionalProperties(false)
-                .build();
-
-        return ToolSpecification.builder()
-                .name("bash")
-                .description("执行 shell 命令")
-                .parameters(parameters)
-                .build();
-    }
 
     private JsonObjectSchema resolveToolSchema(BaseTool tool) {
         Object inputSchema = tool.getInputSchema();

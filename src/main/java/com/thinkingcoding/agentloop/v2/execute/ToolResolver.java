@@ -8,7 +8,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 统一处理语义化工具别名到实际可执行工具的映射。
+ * 原生工具解析器：仅解析注册表中的真实工具名，不做别名映射。
  */
 public class ToolResolver {
 
@@ -18,38 +18,8 @@ public class ToolResolver {
                 ? new HashMap<>()
                 : new HashMap<>(toolCall.getParameters());
 
-        BaseTool direct = toolRegistry.getTool(requestedToolName);
-        if (direct != null) {
-            return new ResolvedTool(requestedToolName, direct, params);
-        }
-
-        if ("write_file".equals(requestedToolName)) {
-            BaseTool fileManager = toolRegistry.getTool("file_manager");
-            params.put("command", "write");
-            return new ResolvedTool("file_manager", fileManager, params);
-        }
-
-        if ("read_file".equals(requestedToolName)) {
-            BaseTool fileManager = toolRegistry.getTool("file_manager");
-            params.put("command", "read");
-            return new ResolvedTool("file_manager", fileManager, params);
-        }
-
-        if ("list_directory".equals(requestedToolName)) {
-            BaseTool fileManager = toolRegistry.getTool("file_manager");
-            params.put("command", "list");
-            return new ResolvedTool("file_manager", fileManager, params);
-        }
-
-        if ("bash".equals(requestedToolName)) {
-            BaseTool commandExecutor = toolRegistry.getTool("command_executor");
-            if (!params.containsKey("command") && params.containsKey("input")) {
-                params.put("command", params.get("input"));
-            }
-            return new ResolvedTool("command_executor", commandExecutor, params);
-        }
-
-        return new ResolvedTool(requestedToolName, null, params);
+        BaseTool tool = toolRegistry.getTool(requestedToolName);
+        return new ResolvedTool(requestedToolName, tool, params);
     }
 
     public record ResolvedTool(String executableToolName, BaseTool tool, Map<String, Object> parameters) {

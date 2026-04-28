@@ -66,6 +66,10 @@ public class ToolDisplay {
      */
     private String getFriendlyToolName(String toolName) {
         return switch (toolName) {
+            case "file_manager" -> "FileManager";
+            case "command_executor" -> "Command";
+            case "code_executor" -> "CodeExec";
+            case "grep_search" -> "Grep";
             case "write_file" -> "Write";
             case "read_file" -> "Read";
             case "execute_command" -> "Bash";
