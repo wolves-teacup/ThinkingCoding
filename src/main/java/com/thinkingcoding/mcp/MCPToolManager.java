@@ -48,7 +48,7 @@ public class MCPToolManager {
         switch (toolName.toLowerCase().trim()) {
             case "github-search":
             case "github":
-                config.put("command", List.of("npx"));
+                config.put("command", List.of(getDefaultNpxCommand()));
                 config.put("args", Arrays.asList(
                     "-y",
                     "@modelcontextprotocol/server-github",
@@ -59,7 +59,7 @@ public class MCPToolManager {
 
             case "file-system":
             case "filesystem":
-                config.put("command", List.of("npx"));
+                config.put("command", List.of(getDefaultNpxCommand()));
                 config.put("args", Arrays.asList(
                     "-y",
                     "@modelcontextprotocol/server-filesystem",
@@ -69,7 +69,7 @@ public class MCPToolManager {
 
             case "sql-query":
             case "postgres":
-                config.put("command", List.of("npx"));
+                config.put("command", List.of(getDefaultNpxCommand()));
                 config.put("args", Arrays.asList(
                     "-y",
                     "@modelcontextprotocol/server-postgres",
@@ -79,7 +79,7 @@ public class MCPToolManager {
                 break;
 
             case "sqlite":
-                config.put("command", List.of("npx"));
+                config.put("command", List.of(getDefaultNpxCommand()));
                 config.put("args", Arrays.asList(
                     "-y",
                     "@modelcontextprotocol/server-sqlite",
@@ -90,7 +90,7 @@ public class MCPToolManager {
 
             case "web-search":
             case "brave-search":
-                config.put("command", List.of("npx"));
+                config.put("command", List.of(getDefaultNpxCommand()));
                 config.put("args", Arrays.asList(
                     "-y",
                     "@modelcontextprotocol/server-brave-search",
@@ -100,7 +100,7 @@ public class MCPToolManager {
                 break;
 
             case "calculator":
-                config.put("command", List.of("npx"));
+                config.put("command", List.of(getDefaultNpxCommand()));
                 config.put("args", Arrays.asList(
                     "-y",
                     "@modelcontextprotocol/server-calculator"
@@ -108,17 +108,17 @@ public class MCPToolManager {
                 break;
 
             case "weather":
-                config.put("command", List.of("npx"));
+                config.put("command", List.of(getDefaultNpxCommand()));
                 config.put("args", Arrays.asList(
                     "-y",
-                    "@coding-squirrel/mcp-weather-server",
+                    "@modelcontextprotocol/server-weather",
                     "--apiKey",
                     "your_weather_api_key"
                 ));
                 break;
 
             case "memory":
-                config.put("command", List.of("npx"));
+                config.put("command", List.of(getDefaultNpxCommand()));
                 config.put("args", Arrays.asList(
                     "-y",
                     "@modelcontextprotocol/server-memory"
@@ -188,5 +188,14 @@ public class MCPToolManager {
 
     public void shutdown() {
         new ArrayList<>(dynamicServers.keySet()).forEach(this::disconnectServer);
+    }
+
+    private String getDefaultNpxCommand() {
+        return isWindows() ? "npx.cmd" : "npx";
+    }
+
+    private boolean isWindows() {
+        String osName = System.getProperty("os.name");
+        return osName != null && osName.toLowerCase(Locale.ROOT).contains("windows");
     }
 }

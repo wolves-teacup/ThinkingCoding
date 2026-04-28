@@ -17,7 +17,7 @@ public class ThinkingCodingCLI {
     public static void main(String[] args) {
         // 设置默认异常处理
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
-            System.err.println("💥 发生未预期错误: " + throwable.getMessage());
+            System.err.println(" 发生未预期错误: " + throwable.getMessage());
             System.exit(1);
         });
 

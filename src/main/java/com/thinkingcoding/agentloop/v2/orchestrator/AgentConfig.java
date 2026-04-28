@@ -6,8 +6,8 @@ package com.thinkingcoding.agentloop.v2.orchestrator;
 public class AgentConfig {
     
     private boolean enabled = false;
-    private int maxReActStepsPerTurn = 6;
-    private int maxToolCallsPerPlan = 3;
+    private int maxReActStepsPerTurn = 20;
+    private int maxToolCallsPerPlan = 10;
     private boolean autoApproveDefault = false;
     private SteeringMode steeringMode = SteeringMode.STRICT;
 
@@ -62,8 +62,8 @@ public class AgentConfig {
     public static AgentConfig defaultConfig() {
         AgentConfig config = new AgentConfig();
         config.setEnabled(false); // 默认关闭，需要显式启用
-        config.setMaxReActStepsPerTurn(6);
-        config.setMaxToolCallsPerPlan(3);
+        config.setMaxReActStepsPerTurn(20);
+        config.setMaxToolCallsPerPlan(10);
         config.setAutoApproveDefault(false);
         config.setSteeringMode(SteeringMode.STRICT);
         return config;

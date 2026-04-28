@@ -54,6 +54,7 @@ public class MCPClient {
             // 分割完整命令为命令和参数，并去除引号
             String[] parts = fullCommand.split("\\s+");
             String command = parts[0].replace("\"", "");  // 去除引号
+            command = normalizeCommandForWindows(command);
 
             List<String> commandList = new ArrayList<>();
             commandList.add(command);
@@ -77,6 +78,7 @@ public class MCPClient {
             ProcessBuilder pb = new ProcessBuilder(commandList);
             pb.directory(new File(System.getProperty("user.dir")));
             configureProxyEnvironment(pb.environment());
+            applyAmapApiKeyIfPresent(commandList, pb.environment());
             
             // 🔥 关键修复：不合并错误流，分开处理
             pb.redirectErrorStream(false);
@@ -95,7 +97,12 @@ public class MCPClient {
 
             if (!process.isAlive()) {
                 int exitCode = process.exitValue();
-                log.error("❌ MCP服务器进程退出，退出码: {}", exitCode);
+                String stderrSummary = getRecentErrorSummary();
+                if (!stderrSummary.isEmpty()) {
+                    log.error("❌ MCP服务器进程退出，退出码: {}\n\n📌 MCP 服务器最近 stderr：\n{}", exitCode, stderrSummary);
+                } else {
+                    log.error("❌ MCP服务器进程退出，退出码: {}", exitCode);
+                }
                 return false;
             }
 
@@ -330,7 +337,12 @@ public class MCPClient {
                 // 检查进程状态
                 if (process != null && !process.isAlive()) {
                     int exitCode = process.exitValue();
-                    log.error("❌ MCP进程已退出，退出码: {}", exitCode);
+                    String stderrSummary = getRecentErrorSummary();
+                    if (!stderrSummary.isEmpty()) {
+                        log.error("❌ MCP进程已退出，退出码: {}\n\n📌 MCP 服务器最近 stderr：\n{}", exitCode, stderrSummary);
+                    } else {
+                        log.error("❌ MCP进程已退出，退出码: {}", exitCode);
+                    }
                     throw new IOException("MCP进程异常退出，退出码: " + exitCode);
                 }
     
@@ -801,6 +813,52 @@ public class MCPClient {
                 return "";
             }
             return String.join("\n", recentErrorLines);
+        }
+    }
+
+    private String normalizeCommandForWindows(String command) {
+        if (command == null) {
+            return null;
+        }
+        String normalized = command.trim();
+        if (isWindows() && "npx".equalsIgnoreCase(normalized)) {
+            return "npx.cmd";
+        }
+        return normalized;
+    }
+
+    private void applyAmapApiKeyIfPresent(List<String> commandList, Map<String, String> env) {
+        if (commandList == null || env == null) {
+            return;
+        }
+        if (env.containsKey("AMAP_MAPS_API_KEY")) {
+            return;
+        }
+
+        int pkgIndex = commandList.indexOf("@amap/amap-maps-mcp-server");
+        if (pkgIndex < 0) {
+            return;
+        }
+
+        // The AMAP MCP server expects API key via environment variable.
+        for (int i = pkgIndex + 1; i < commandList.size() - 1; i++) {
+            String token = commandList.get(i);
+            if ("--apiKey".equalsIgnoreCase(token) || "--apikey".equalsIgnoreCase(token)) {
+                String value = commandList.get(i + 1);
+                if (value != null && !value.startsWith("-")) {
+                    env.put("AMAP_MAPS_API_KEY", value);
+                    commandList.remove(i + 1);
+                    commandList.remove(i);
+                }
+                return;
+            }
+        }
+
+        String candidate = commandList.get(commandList.size() - 1);
+        if (candidate != null && !candidate.startsWith("-")
+                && !"@amap/amap-maps-mcp-server".equalsIgnoreCase(candidate)) {
+            env.put("AMAP_MAPS_API_KEY", candidate);
+            commandList.remove(commandList.size() - 1);
         }
     }
 }

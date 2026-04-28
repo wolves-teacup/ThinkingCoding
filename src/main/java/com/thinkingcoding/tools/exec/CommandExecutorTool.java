@@ -44,16 +44,35 @@ public class CommandExecutorTool extends BaseTool {
         }
     }
 
+    /**
+     * 执行系统命令并返回执行结果
+     * <p>
+     * 该方法支持两种输入格式：
+     * 1. 纯文本命令：直接执行命令字符串
+     * 2. JSON格式：{"command":"命令内容"}，从JSON中提取command字段
+     * <p>
+     * 执行流程：
+     * - 验证输入非空
+     * - 解析命令（支持JSON格式）
+     * - 安全检查：验证命令是否在允许列表中
+     * - 根据操作系统选择对应的shell执行（Windows使用cmd.exe，其他使用sh）
+     * - 捕获标准输出和错误流
+     * - 等待进程完成并返回结果
+     *
+     * @param input 要执行的命令字符串，可以是纯文本或JSON格式
+     * @return ToolResult 包含执行结果的对象，成功时返回输出内容，失败时返回错误信息
+     */
     @Override
     public ToolResult execute(String input) {
         long startTime = System.currentTimeMillis();
 
         try {
+            //trim() 以确保输入不只是空格(去除字符串两端的空白字符)
             if (input == null || input.trim().isEmpty()) {
                 return error("No command provided", System.currentTimeMillis() - startTime);
             }
 
-            // 🔥 处理 JSON 格式的输入：{"command":"rm sessions/*"}
+            //  处理 JSON 格式的输入：{"command":"rm sessions/*"}
             String command = input;
             if (input.trim().startsWith("{")) {
                 try {
@@ -78,7 +97,7 @@ public class CommandExecutorTool extends BaseTool {
                         System.currentTimeMillis() - startTime);
             }
 
-            // 🔥 执行命令 - 通过 shell 执行以支持通配符等特性
+            //  执行命令 - 通过 shell 执行以支持通配符等特性
             ProcessBuilder processBuilder;
             String os = System.getProperty("os.name").toLowerCase();
             if (os.contains("win")) {
@@ -89,7 +108,7 @@ public class CommandExecutorTool extends BaseTool {
                 processBuilder = new ProcessBuilder("sh", "-c", command);
             }
 
-            // 🔥 设置工作目录为当前目录（作为默认路径）
+            //  设置工作目录为当前目录（作为默认路径）
             // 但命令中可以使用绝对路径访问其他目录
             processBuilder.directory(new java.io.File(System.getProperty("user.dir")));
             processBuilder.redirectErrorStream(true);

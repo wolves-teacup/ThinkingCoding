@@ -8,8 +8,6 @@ import com.thinkingcoding.core.ThinkingCodingContext;
 import com.thinkingcoding.model.ChatMessage;
 import com.thinkingcoding.service.SessionService;
 import com.thinkingcoding.ui.ThinkingCodingUI;
-import com.thinkingcoding.config.MCPConfig;
-import com.thinkingcoding.config.MCPServerConfig;
 import picocli.CommandLine;
 
 import java.util.*;
@@ -81,9 +79,6 @@ public class ThinkingCodingCommand implements Callable<Integer> {
     // 🔥 V2 AgentLoop 选项
     @CommandLine.Option(names = {"--agent-loop"}, description = "AgentLoop version: legacy|v2 (default: v2)")
     private String agentLoopVersion = "v2";
-
-    @CommandLine.Option(names = {"--max-react-steps"}, description = "Max ReAct steps per turn (V2 only, default: 6)")
-    private int maxReactSteps = 6;
 
     @CommandLine.Option(names = {"--auto-approve"}, description = "Enable auto-approve mode for tools (V2 only)")
     private boolean autoApprove = false;
@@ -267,7 +262,6 @@ public class ThinkingCodingCommand implements Callable<Integer> {
         if ("v2".equalsIgnoreCase(agentLoopVersion)) {
             ui.displaySuccess("✅ AgentLoop V2 已启用");
             ui.displayInfo("   架构: Plan → Execute + ReAct → Steering");
-            ui.displayInfo("   - Max ReAct Steps: " + maxReactSteps);
             ui.displayInfo("   - Auto Approve: " + (autoApprove ? "ON" : "OFF"));
             ui.displayInfo("   - 支持命令: /stop, /cancel, /auto-approve-on/off");
         } else {
@@ -376,7 +370,6 @@ public class ThinkingCodingCommand implements Callable<Integer> {
                 // 配置 V2
                 AgentConfig config = AgentConfig.defaultConfig();
                 config.setEnabled(true);
-                config.setMaxReActStepsPerTurn(maxReactSteps);
                 config.setAutoApproveDefault(autoApprove);
                 
                 // 创建 V2 AgentOrchestrator
@@ -459,7 +452,7 @@ public class ThinkingCodingCommand implements Callable<Integer> {
                     String[] connectArgs = argument.split("\\s+");
                     if (connectArgs.length >= 1) {
                         String serverName = connectArgs[0];
-                        String serverCommand = connectArgs.length >= 2 ? connectArgs[1] : "npx";
+                        String serverCommand = connectArgs.length >= 2 ? connectArgs[1] : getDefaultNpxCommand();
 
                         // 🔥 根据服务器名自动构建参数
                         List<String> args = buildMCPArgs(serverName);
@@ -799,7 +792,7 @@ public class ThinkingCodingCommand implements Callable<Integer> {
 
             case "weather":
                 args.add("-y");
-                args.add("@coding-squirrel/mcp-weather-server");
+                args.add("@modelcontextprotocol/server-weather");
                 args.add("--apiKey");
                 args.add("your_weather_api_key");
                 break;
@@ -814,6 +807,15 @@ public class ThinkingCodingCommand implements Callable<Integer> {
         return args;
     }
 
+    private String getDefaultNpxCommand() {
+        String osName = System.getProperty("os.name");
+        if (osName != null && osName.toLowerCase(Locale.ROOT).contains("windows")) {
+            return "npx.cmd";
+        }
+        return "npx";
+    }
+
     // ... 其他方法保持不变（handleInternalCommand, handleSinglePrompt, handleNewSession, handleSaveSession, handleListSessions, displaySessionList, handleClearScreen, saveCurrentSession）
     // 这些方法不需要修改，保持原有逻辑
 }
+

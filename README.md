@@ -4,11 +4,7 @@
 
 一个基于 LangChain 的交互式代码助手 CLI 工具，支持流式输出、工具调用和智能对话。
 
-## 🎥 项目演示
 
-[![观看演示视频](https://img.shields.io/badge/观看演示视频-red?style=for-the-badge&logo=bilibili)](https://www.bilibili.com/video/BV14D4uzWEhC?vd_source=5a2abdf9d1d2a4d1cb15fa9b92f6fbb2)
-
-*点击按钮前往bilibili观看完整项目演示*
 
 ## 🚀 项目特性
 
@@ -488,9 +484,10 @@ mcp:
     #Weather
     - name: "weather"
       command: "npx"
-      enabled: false
+      enabled: true
       args:
-        - "@coding-squirrel/mcp-weather-server"
+        - "-y"
+        - "@modelcontextprotocol/server-weather"
         - "--apiKey"
         - "your_weather_api_key"
 ```

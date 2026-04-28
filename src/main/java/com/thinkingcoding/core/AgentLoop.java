@@ -30,8 +30,8 @@ public class AgentLoop {
     private final List<ChatMessage> history;
     private final String sessionId;
     private final String modelName;
-    private final ToolExecutionConfirmation confirmation;  // 🔥 新增：交互式确认组件
-    private final OptionManager optionManager;  // 🔥 新增：选项管理器
+    private final ToolExecutionConfirmation confirmation;  //  新增：交互式确认组件
+    private final OptionManager optionManager;  //  新增：选项管理器
 
     public AgentLoop(ThinkingCodingContext context, String sessionId, String modelName) {
         this.context = context;
@@ -39,13 +39,13 @@ public class AgentLoop {
         this.modelName = modelName;
         this.history = new ArrayList<>();
 
-        // 🔥 创建交互式确认组件
+        //  创建交互式确认组件
         this.confirmation = new ToolExecutionConfirmation(
             context.getUi(),
             context.getUi().getLineReader()
         );
 
-        // 🔥 创建选项管理器
+        //  创建选项管理器
         this.optionManager = new OptionManager();
 
         // 设置消息和工具调用处理器
@@ -65,7 +65,7 @@ public class AgentLoop {
         monitor.start();
 
         try {
-            // 🔥 检查是否是选项输入（用户输入 1/2/3/4 选择）
+            //  检查是否是选项输入（用户输入 1/2/3/4 选择）
             if (optionManager.isOptionInput(input)) {
                 handleOptionSelection(input);
                 return;
@@ -81,7 +81,7 @@ public class AgentLoop {
             // 流式处理AI响应
             context.getAiService().streamingChat(input, history, modelName);
 
-            // 🔥 AI 响应完成后，执行待处理的工具调用
+            //  AI 响应完成后，执行待处理的工具调用
             executePendingToolCall();
 
             // 保存会话
