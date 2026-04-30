@@ -32,8 +32,7 @@ public class ContextManager {
     // 默认配置
     private static final int DEFAULT_MAX_HISTORY_TURNS = 10;  // 保留10轮（20条消息）
     private static final int DEFAULT_MAX_CONTEXT_TOKENS = 3000;  // 为历史预留3000 tokens
-    private static final int DEFAULT_RESERVE_TOKENS = 1000;  // 为响应预留1000 tokens
-    private static final int DEFAULT_KEEP_RECENT = 3; // 保留3轮（三轮以上的tool_result将被清除）
+    private static final int DEFAULT_MAX_OUTPUT_TOKENS = 4096;  // 模型单次最大输出 tokens
 
     // 策略枚举
     public enum Strategy {
@@ -45,6 +44,12 @@ public class ContextManager {
     private Strategy strategy = Strategy.TOKEN_BASED;  // 默认使用 Token 控制
     private int maxHistoryTurns = DEFAULT_MAX_HISTORY_TURNS;
     private int maxContextTokens = DEFAULT_MAX_CONTEXT_TOKENS;
+    private int maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS;
+
+    private volatile int lastHistoryTokens = -1;
+    private volatile int lastPromptTokens = -1;
+    private volatile int lastCompletionTokens = -1;
+    private volatile int lastTotalTokens = -1;
 
     private static final Path TRANSCRIPT_DIR = Paths.get("transcripts");
     private final ObjectMapper objectMapper;
@@ -64,9 +69,22 @@ public class ContextManager {
      * 从配置加载参数
      */
     private void loadConfiguration() {
-        // TODO: 从 config.yaml 读取配置
-        // 目前使用默认值
-        // 🔥 移除初始化日志，保持输出简洁
+        AppConfig.ModelConfig modelConfig = appConfig.getModelConfig(appConfig.getDefaultModel());
+        if (modelConfig == null) {
+            return;
+        }
+
+        Integer configuredMaxOutput = modelConfig.getMaxTokens();
+        if (configuredMaxOutput != null && configuredMaxOutput > 0) {
+            this.maxOutputTokens = configuredMaxOutput;
+        }
+
+        Integer configuredMaxContext = modelConfig.getMaxContextTokens();
+        if (configuredMaxContext != null && configuredMaxContext > 0) {
+            this.maxContextTokens = configuredMaxContext;
+        } else if (this.maxOutputTokens > 0 && this.maxContextTokens <= this.maxOutputTokens) {
+            this.maxContextTokens = this.maxOutputTokens + DEFAULT_MAX_CONTEXT_TOKENS;
+        }
     }
 
     private void initializeChatModel() {
@@ -109,7 +127,7 @@ public class ContextManager {
 
         List<ChatMessage> result;
 
-        //自动压缩超过三轮的工具调用结果
+        //自动压缩，只保留轮询中最后一个 user 消息之前的工具调用结果，且只保留前后各200字符，中间省略，标明工具名称，以节省 token
         List<ChatMessage> afterMicro = micro_compact(fullHistory);
 
         switch (strategy) {
@@ -378,15 +396,30 @@ public class ContextManager {
      * 保留最近 N 轮对话
      */
     private List<ChatMessage> applySlidingWindow(List<ChatMessage> fullHistory) {
-        int maxMessages = maxHistoryTurns * 2;  // 每轮包含用户+AI消息
-
-        if (fullHistory.size() <= maxMessages) {
-            return new ArrayList<>(fullHistory);
+        if (fullHistory == null || fullHistory.isEmpty()) {
+            return new ArrayList<>();
         }
 
-        // 保留最近 N 条消息
-        int startIndex = fullHistory.size() - maxMessages;
-        return new ArrayList<>(fullHistory.subList(startIndex, fullHistory.size()));
+        // maxHistoryTurns 现在真实代表“保留多少个 User 的问题回合”
+        int remainTurns = maxHistoryTurns;
+
+        int boundaryIndex = 0; // 默认保留全部
+        int userMessageCount = 0;
+
+        // 从后往前扫，数遇到了几个 "user" 消息
+        for (int i = fullHistory.size() - 1; i >= 0; i--) {
+            ChatMessage msg = fullHistory.get(i);
+            if ("user".equals(msg.getRole())) {
+                userMessageCount++;
+                // 当找到了正好是保留上限的那个 user 消息，记录索引并跳出
+                if (userMessageCount == remainTurns) {
+                    boundaryIndex = i;
+                    break;
+                }
+            }
+        }
+
+        return new ArrayList<>(fullHistory.subList(boundaryIndex, fullHistory.size()));
     }
 
     /**
@@ -394,16 +427,7 @@ public class ContextManager {
      * 根据 Token 数量动态截断
      */
     private List<ChatMessage> applyTokenLimit(List<ChatMessage> fullHistory,List<ChatMessage> afterMicro) {
-        int totalTokens = 0;
-
-        for(int i = 0; i < afterMicro.size(); i++) {
-            ChatMessage msg = afterMicro.get(i);
-            int msgTokens = estimateTokens(msg.getContent());
-
-            totalTokens += msgTokens;
-        }
-
-        if(totalTokens < maxContextTokens){
+        if (!shouldCompressHistory()) {
             return afterMicro;
         }
 
@@ -437,6 +461,7 @@ public class ContextManager {
             // 重新接上尾部对话，保证上下文连贯
             fullHistory.addAll(tailMessages);
 
+            resetTokenUsage();
             return fullHistory;
         } catch (Exception e){
             return afterMicro;
@@ -511,21 +536,26 @@ public class ContextManager {
      * 输出上下文统计信息
      */
     private void logContextStatistics(List<ChatMessage> fullHistory, List<ChatMessage> managedHistory) {
-        int fullTokens = fullHistory.stream()
-                .mapToInt(msg -> estimateTokens(msg.getContent()))
-                .sum();
+        if (lastHistoryTokens < 0) {
+            return;
+        }
 
-        int managedTokens = managedHistory.stream()
-                .mapToInt(msg -> estimateTokens(msg.getContent()))
-                .sum();
-
-        if (fullHistory.size() != managedHistory.size()) {
-            log.debug("📊 上下文管理统计:");
-            log.debug("  完整历史: {} 条消息 (~{} tokens)", fullHistory.size(), fullTokens);
-            log.debug("  发送历史: {} 条消息 (~{} tokens)", managedHistory.size(), managedTokens);
-            log.debug("  节省: {} tokens ({}%)",
-                    fullTokens - managedTokens,
-                    (fullTokens - managedTokens) * 100 / Math.max(fullTokens, 1));
+        int threshold = getCompressionThreshold();
+        boolean compressed = managedHistory.size() < fullHistory.size();
+        
+        // 使用 INFO 级别日志，便于观察
+        log.info("📊 上下文管理统计:");
+        log.info("  策略: {}", strategy);
+        log.info("  历史消息 tokens: {}", lastHistoryTokens);
+        log.info("  压缩阈值: {} (maxContext {} - maxOutput {})", threshold, maxContextTokens, maxOutputTokens);
+        log.info("  是否需要压缩: {}", shouldCompressHistory());
+        log.info("  历史消息数量: {} 条 → 发送历史数量: {} 条", fullHistory.size(), managedHistory.size());
+        
+        if (compressed) {
+            double compressionRate = (1 - (double)managedHistory.size() / fullHistory.size()) * 100;
+            log.info("  ✅ 已压缩！压缩率: {:.2f}%", compressionRate);
+        } else {
+            log.info("  ⏸️  未压缩");
         }
     }
 
@@ -541,8 +571,54 @@ public class ContextManager {
     }
 
     private String callLlmForSummary(String prompt) {
+        if (ChatModel == null) {
+            throw new IllegalStateException("Chat model not initialized");
+        }
         ChatResponse response = ChatModel.chat(UserMessage.from(prompt));
         return response.aiMessage().text();
+    }
+
+    public synchronized void recordTokenUsage(int promptTokens, int completionTokens, int totalTokens) {
+        if (promptTokens <= 0 && totalTokens <= 0) {
+            return;
+        }
+
+        lastPromptTokens = promptTokens;
+        lastCompletionTokens = completionTokens;
+        if (totalTokens > 0) {
+            lastTotalTokens = totalTokens;
+        } else {
+            // 如果 totalTokens 没有提供，则根据 promptTokens 和 completionTokens 估算
+            lastTotalTokens = Math.max(0, promptTokens) + Math.max(0, completionTokens);
+        }
+        lastHistoryTokens = lastTotalTokens;
+        
+        // 记录token使用情况
+        log.info("🔢 Token使用记录: prompt={}, completion={}, total={}", 
+            promptTokens, completionTokens, lastTotalTokens);
+        log.info("  压缩阈值: {}, 是否触发压缩: {}", 
+            getCompressionThreshold(), shouldCompressHistory());
+    }
+
+    public synchronized void resetTokenUsage() {
+        lastHistoryTokens = -1;
+        lastPromptTokens = -1;
+        lastCompletionTokens = -1;
+        lastTotalTokens = -1;
+    }
+
+    // 获取当前历史消息的 Token 数量
+    int getCompressionThreshold() {
+        return maxContextTokens - maxOutputTokens;
+    }
+
+    // 判断是否需要压缩历史消息
+    boolean shouldCompressHistory() {
+        int threshold = getCompressionThreshold();
+        if (lastHistoryTokens < 0 || threshold <= 0) {
+            return false;
+        }
+        return lastHistoryTokens >= threshold;
     }
 
     /**
@@ -574,6 +650,11 @@ public class ContextManager {
     public void setMaxContextTokens(int maxContextTokens) {
         this.maxContextTokens = maxContextTokens;
         log.info("设置最大上下文 Tokens: {}", maxContextTokens);
+    }
+
+    public void setMaxOutputTokens(int maxOutputTokens) {
+        this.maxOutputTokens = maxOutputTokens;
+        log.info("设置最大输出 Tokens: {}", maxOutputTokens);
     }
 
     /**

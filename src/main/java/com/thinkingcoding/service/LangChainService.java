@@ -142,7 +142,9 @@ public class LangChainService implements AIService {
         isGenerating = true;
         shouldStop = false;
 
+        // 记录用户输入到历史记录中
         final StringBuilder fullResponse = new StringBuilder();
+        // 将用户输入添加到历史记录中，以便在生成过程中保持完整的对话上下文。
         final CompletableFuture<Void> completionFuture = new CompletableFuture<>();
 
         try {
@@ -175,15 +177,15 @@ public class LangChainService implements AIService {
                 @Override
                 public void onCompleteResponse(ChatResponse chatResponse) {
                     try {
-                        // 🔥 记录实际的 token 使用情况（用于优化估算算法）
+                        //  记录实际的 token 使用情况
                         if (chatResponse.tokenUsage() != null && contextManager != null) {
-                            int actualPromptTokens = chatResponse.tokenUsage().promptTokenCount();
-                            
-                            // 估算当前发送的 messages 的 token 数
-                            // 注意：这里只是一个粗略估算，实际应该在 prepareMessages 时记录
-                            int estimatedTokens = actualPromptTokens;  // 暂时用实际值代替
-                            
-                            contextManager.recordTokenUsage(estimatedTokens, actualPromptTokens);
+                            Object tokenUsage = chatResponse.tokenUsage();
+                            int promptTokens = readTokenUsage(tokenUsage,
+                                    "promptTokenCount", "inputTokenCount", "promptTokens", "inputTokens");
+                            int completionTokens = readTokenUsage(tokenUsage,
+                                    "completionTokenCount", "outputTokenCount", "completionTokens", "outputTokens");
+                            int totalTokens = readTokenUsage(tokenUsage, "totalTokenCount", "totalTokens");
+                            contextManager.recordTokenUsage(promptTokens, completionTokens, totalTokens);
                         }
                         
                         // 如果用户主动停止生成，添加截断标记
@@ -521,5 +523,21 @@ public class LangChainService implements AIService {
             System.out.println("⏸️  正在停止生成...");
         }
     }
-}
 
+    private int readTokenUsage(Object tokenUsage, String... methodNames) {
+        for (String methodName : methodNames) {
+            try {
+                java.lang.reflect.Method method = tokenUsage.getClass().getMethod(methodName);
+                Object value = method.invoke(tokenUsage);
+                if (value instanceof Number number) {
+                    return number.intValue();
+                }
+            } catch (NoSuchMethodException ignored) {
+                // Try next method name
+            } catch (Exception e) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+}

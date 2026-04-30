@@ -127,6 +127,9 @@ public class AppConfig {
         @JsonProperty("maxTokens")
         private Integer maxTokens = 4096;
 
+        @JsonProperty("maxContextTokens")
+        private Integer maxContextTokens;
+
         @JsonProperty("temperature")
         private Double temperature = 0.7;
 
@@ -178,6 +181,14 @@ public class AppConfig {
 
         public void setMaxTokens(Integer maxTokens) {
             this.maxTokens = maxTokens;
+        }
+
+        public Integer getMaxContextTokens() {
+            return maxContextTokens;
+        }
+
+        public void setMaxContextTokens(Integer maxContextTokens) {
+            this.maxContextTokens = maxContextTokens;
         }
     }
 
