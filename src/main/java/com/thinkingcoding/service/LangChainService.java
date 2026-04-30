@@ -175,6 +175,17 @@ public class LangChainService implements AIService {
                 @Override
                 public void onCompleteResponse(ChatResponse chatResponse) {
                     try {
+                        // 🔥 记录实际的 token 使用情况（用于优化估算算法）
+                        if (chatResponse.tokenUsage() != null && contextManager != null) {
+                            int actualPromptTokens = chatResponse.tokenUsage().promptTokenCount();
+                            
+                            // 估算当前发送的 messages 的 token 数
+                            // 注意：这里只是一个粗略估算，实际应该在 prepareMessages 时记录
+                            int estimatedTokens = actualPromptTokens;  // 暂时用实际值代替
+                            
+                            contextManager.recordTokenUsage(estimatedTokens, actualPromptTokens);
+                        }
+                        
                         // 如果用户主动停止生成，添加截断标记
                         if (shouldStop && !fullResponse.isEmpty()) {
                             ChatMessage truncatedMessage = new ChatMessage("assistant",
@@ -441,8 +452,9 @@ public class LangChainService implements AIService {
     }
 
     private List<dev.langchain4j.data.message.ChatMessage>  prepareMessages(String input, List<ChatMessage> history) {
+        // 添加项目上下文
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
-
+        // 在对话开始时注入项目相关的系统消息，提供必要的背景信息帮助模型理解当前环境和限制。
         if (contextManager != null) {
             ChatMessage projectContext = contextManager.buildProjectContextMessage();
             if (projectContext != null) {
@@ -450,6 +462,7 @@ public class LangChainService implements AIService {
             }
         }
 
+        // 管理对话历史，注入必要的上下文信息（如工具使用记录、已执行的命令等），以帮助模型更好地理解当前对话状态和限制。
         List<ChatMessage> managedHistory = history;
         if (contextManager != null && history != null && !history.isEmpty()) {
             managedHistory = contextManager.getContextForAI(history);

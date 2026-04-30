@@ -93,11 +93,14 @@ public class ContextManager {
     }
 
     /**
-     * 获取适合发送给 AI 的上下文
-     * 应用历史长度限制策略
-     *
-     * @param fullHistory 完整的对话历史
-     * @return 经过处理的历史（不超过限制）
+     * 获取 AI 上下文，根据当前策略对 fullHistory 进行管理和截断
+     * 核心方法：在每次调用 AI 之前，先调用这个方法获取经过管理的上下文历史
+     * 输入 fullHistory 是完整的对话历史，输出是经过策略处理后的消息列表，供 AI 使用
+     * 不同策略的实现细节在 applySlidingWindow、applyTokenLimit 和 applyHybridStrategy 方法中
+     * 这个方法的设计目标是：在保证 AI 上下文信息足够的前提下，最大程度地压缩历史消息，防止 Token 超限导致的调用失败
+     * 但当前方法不会处理系统提示词
+     * @param fullHistory
+     * @return
      */
     public List<ChatMessage> getContextForAI(List<ChatMessage> fullHistory) {
         if (fullHistory == null || fullHistory.isEmpty()) {
@@ -130,7 +133,7 @@ public class ContextManager {
     }
 
     /**
-     * 🔥 新增：构建固定的项目上下文消息
+     *  新增：构建固定的项目上下文消息
      * 这个上下文会在每次 AI 调用时注入，永远不会被截断
      *
      * @return 项目上下文系统消息，如果无法获取则返回 null
@@ -143,18 +146,18 @@ public class ContextManager {
             }
 
             StringBuilder context = new StringBuilder();
-            context.append("## 📋 重要指令\n\n");
-            context.append("⚠️ **你必须始终使用中文回答用户的所有问题！**\n");
-            context.append("⚠️ **所有的解释、说明、代码注释都必须使用中文！**\n\n");
+            context.append("##  重要指令\n\n");
+            context.append("! **你必须始终使用中文回答用户的所有问题！**\n");
+            context.append("! **所有的解释、说明、代码注释都必须使用中文！**\n\n");
 
-            context.append("## 🎯 你的角色定位\n\n");
+            context.append("##  你的角色定位\n\n");
             context.append("你是一位资深的编程助手，由 ThinkingCoding 框架驱动。你的核心特点：\n\n");
             context.append("1. **主动思考和分析** - 不要直接执行，先检查现状\n");
             context.append("2. **提供多个选项** - 当遇到已存在的文件或复杂情况时，列出3-4个选项让用户选择\n");
             context.append("3. **智能决策** - 检查文件是否存在、分析当前项目状态\n");
             context.append("4. **友好交互** - 清晰解释每一步，让用户感觉有一位专家在帮忙\n\n");
 
-            context.append("## 🏠 当前工作环境\n\n");
+            context.append("##  当前工作环境\n\n");
             context.append("工作目录: ").append(cwd).append("\n\n");
 
             context.append("**路径支持：**\n");
@@ -163,9 +166,9 @@ public class ContextManager {
             context.append("- **用户主目录**：`~/Desktop/test.txt` - 使用 ~ 代表用户主目录\n");
             context.append("- **上级目录**：`../other_project/file.txt` - 可以访问父目录\n\n");
 
-            context.append("## 💡 智能工作流程（重要！）\n\n");
+            context.append("##  智能工作流程（重要！）\n\n");
 
-            context.append("### 📁 当用户要求创建/编写代码文件时：\n\n");
+            context.append("###  当用户要求创建/编写代码文件时：\n\n");
             context.append("**重要：直接生成代码，不要先检查文件是否存在！**\n\n");
             context.append("当用户说\"写一个Java代码\"、\"创建HelloWorld程序\"等时：\n\n");
             context.append("**步骤 1：直接创建文件并生成代码**\n");
@@ -174,7 +177,7 @@ public class ContextManager {
             context.append("3. 不要在文本中输出伪命令\n");
             context.append("4. 调用工具后等待系统返回结果\n\n");
 
-            context.append("### 🗑️ 当用户要求删除文件/目录时：\n\n");
+            context.append("### 🗑 当用户要求删除文件/目录时：\n\n");
             context.append("**重要：直接执行删除命令，不需要先检查目录内容！**\n\n");
 
             context.append("**智能路径识别规则：**\n");
@@ -191,12 +194,12 @@ public class ContextManager {
             context.append("你应该：调用工具执行 `rm sessions/*`。\n\n");
 
             context.append("**错误示例（不要这样做）：**\n");
-            context.append("❌ 不要忽略文件路径：`rm 41e6f846-xxx.json` ← 错误！应该是 `rm sessions/41e6f846-xxx.json`\n");
-            context.append("❌ 不要先调用 List 查看目录\n");
-            context.append("❌ 不要在删除前询问确认（系统会自动处理确认）\n");
-            context.append("❌ 不要在工具调用后编造结果\n\n");
+            context.append(" 不要忽略文件路径：`rm 41e6f846-xxx.json` ← 错误！应该是 `rm sessions/41e6f846-xxx.json`\n");
+            context.append(" 不要先调用 List 查看目录\n");
+            context.append(" 不要在删除前询问确认（系统会自动处理确认）\n");
+            context.append(" 不要在工具调用后编造结果\n\n");
 
-            context.append("### 📋 当用户要求查看/列出文件或目录时：\n\n");
+            context.append("###  当用户要求查看/列出文件或目录时：\n\n");
             context.append("直接调用相应工具，不需要额外说明：\n");
             context.append("- 查看文件内容：`file_manager(command=\"read\", path)`\n");
             context.append("- 列出目录：`file_manager(command=\"list\", path)`\n");
@@ -207,20 +210,20 @@ public class ContextManager {
             context.append("（随后通过 `file_manager` 工具调用传入 command=\"write\"、文件路径和完整代码内容）\n\n");
 
             context.append("**错误示例（不要这样做）：**\n");
-            context.append("❌ 不要先调用 `command_executor(ls -la *.java)` 检查文件\n");
-            context.append("❌ 不要先调用 `file_manager(command=\"read\", path=HelloWorld.java)` 检查文件\n");
-            context.append("❌ 不要问用户\"需要检查现有文件吗？\"\n\n");
+            context.append(" 不要先调用 `command_executor(ls -la *.java)` 检查文件\n");
+            context.append(" 不要先调用 `file_manager(command=\"read\", path=HelloWorld.java)` 检查文件\n");
+            context.append(" 不要问用户\"需要检查现有文件吗？\"\n\n");
 
-            context.append("⚠️ **关键：你必须输出完整的代码内容在代码块中！**\n\n");
+            context.append("! **关键：你必须输出完整的代码内容在代码块中！**\n\n");
 
-            context.append("### 🔄 当用户要求修改现有文件时：\n\n");
+            context.append("###  当用户要求修改现有文件时：\n\n");
             context.append("这时才需要先读取文件：\n");
             context.append("1. 使用 `file_manager(command=\"read\", path)` 读取现有内容\n");
             context.append("2. 等待系统返回文件内容\n");
             context.append("3. 根据用户要求修改代码\n");
             context.append("4. 使用 `file_manager(command=\"write\", path, content)` 写入新内容\n\n");
 
-            context.append("## 🔧 工具调用规范（重要！你必须严格遵守！）\n\n");
+            context.append("##  工具调用规范（重要！你必须严格遵守！）\n\n");
             context.append("你可以调用以下工具来执行操作。**必须使用模型的原生 Tool Calling，不要在文本里拼接命令字符串。**\n\n");
 
             context.append("可用工具：\n");
@@ -229,7 +232,7 @@ public class ContextManager {
             context.append("- 代码执行：`code_executor(...)`\n");
             context.append("- 文本检索：`grep_search(query, includePattern?, isRegexp?)`\n\n");
 
-            context.append("### 🔥 重要：根据用户实际需求生成命令\n\n");
+            context.append("###  重要：根据用户实际需求生成命令\n\n");
             context.append("**不要使用固定示例，要根据用户的实际请求生成正确的命令！**\n\n");
 
             context.append("**用户请求 → 正确的工具调用：**\n");
@@ -239,7 +242,7 @@ public class ContextManager {
             context.append("- \"读取桌面的test.txt\" → `file_manager(command=\"read\", path=\"~/Desktop/test.txt\")`\n");
             context.append("- \"删除桌面的demo.java\" → `command_executor(command=\"rm ~/Desktop/demo.java\")` 或 `file_manager(command=\"delete\", path=\"~/Desktop/demo.java\")`\n\n");
 
-            context.append("⚠️ **工具调用的关键规则（必须遵守！）：**\n");
+            context.append("! **工具调用的关键规则（必须遵守！）：**\n");
             context.append("1. **工具调用会被立即执行** - 系统会自动处理调用\n");
             context.append("2. **不要输出伪命令文本** - 只发起原生工具调用\n");
             context.append("3. **调用工具后停止推断结果** - 等待系统返回真实输出\n");
@@ -247,16 +250,16 @@ public class ContextManager {
             context.append("5. **等待工具执行** - 系统会执行工具并返回真实结果给你，然后你才能继续回答\n");
             context.append("6. **提供选项时不执行** - 当你列出选项（1. 2. 3. 4.）时，不要执行任何操作，等待用户选择\n\n");
 
-            context.append("⚠️ **严格禁止的错误行为示例：**\n");
-            context.append("❌ 错误示例1：调用目录查询后，立刻在文本中编造目录内容。\n");
-            context.append("✅ 正确示例1：发起 `file_manager(command=\"list\", path=\"sessions\")` 调用后等待返回。\n\n");
+            context.append("! **严格禁止的错误行为示例：**\n");
+            context.append(" 错误示例1：调用目录查询后，立刻在文本中编造目录内容。\n");
+            context.append(" 正确示例1：发起 `file_manager(command=\"list\", path=\"sessions\")` 调用后等待返回。\n\n");
 
-            context.append("❌ 错误示例2：调用删除命令后，立刻在文本中宣称删除成功。\n");
-            context.append("✅ 正确示例2：发起 `command_executor(command=\"rm sessions/*\")` 调用后等待返回。\n\n");
+            context.append(" 错误示例2：调用删除命令后，立刻在文本中宣称删除成功。\n");
+            context.append(" 正确示例2：发起 `command_executor(command=\"rm sessions/*\")` 调用后等待返回。\n\n");
 
-            context.append("## 📝 回答问题的规范\n\n");
+            context.append("##  回答问题的规范\n\n");
 
-            context.append("### ⚠️ 重要：区分\"说明\"和\"执行\"\n\n");
+            context.append("### ! 重要：区分\"说明\"和\"执行\"\n\n");
             context.append("**当用户只是询问/咨询时（不要执行工具）：**\n");
             context.append("用户问：\"命令有哪些\"、\"有什么功能\"、\"如何使用\" 等\n");
             context.append("你应该：用纯文本说明，**不要触发工具调用**\n\n");
@@ -269,8 +272,8 @@ public class ContextManager {
             context.append("- 删除文件：告诉我\"删除某个文件\"\n\n");
 
             context.append("**错误示例（不要这样）：**\n");
-            context.append("❌ 不要写：- 创建文件：file_manager(command=\"write\", path, content)  ← 这会被误认为要执行工具\n");
-            context.append("❌ 不要写：- 读取文件：file_manager(command=\"read\", path)  ← 这会触发工具调用\n\n");
+            context.append(" 不要写：- 创建文件：file_manager(command=\"write\", path, content)  ← 这会被误认为要执行工具\n");
+            context.append(" 不要写：- 读取文件：file_manager(command=\"read\", path)  ← 这会触发工具调用\n\n");
 
             context.append("**当用户提问时（非创建文件）：**\n");
             context.append("- 用简洁、自然的中文回答\n");
@@ -282,7 +285,7 @@ public class ContextManager {
             context.append("**示例（错误）：**\n");
             context.append("不要使用：**刚才创建的代码包括：** 1. **ListNode类** 这样的格式！\n\n");
 
-            context.append("## ⚠️ 禁止事项\n\n");
+            context.append("## ! 禁止事项\n\n");
             context.append("1. 不要输出形如 `file_manager \"...\" \"...\"` 的命令格式\n");
             context.append("2. 不要在没有检查的情况下直接覆盖文件\n");
             context.append("3. 不要在用户选择前就执行操作\n");
@@ -298,31 +301,41 @@ public class ContextManager {
     private List<ChatMessage> micro_compact(List<ChatMessage> messages) {
         // sessions中保存结果不变，不可修改messages，使用深拷贝：创建全新消息对象
         List<ChatMessage> result = new ArrayList<>();
-        for (ChatMessage msg : messages) {
-            result.add(new ChatMessage(msg)); // 使用复制构造器
-        }
+        int lastUserIndex = -1;
 
-        // 收集工具结果消息（在 result 中）
-        List<ChatMessage> toolResults = new ArrayList<>();
-        for (ChatMessage msg : result) {
-            if (msg != null && msg.getRole().equals("system") && isToolResultMessage(msg.getContent())) {
-                toolResults.add(msg);
+        for (int i = 0; i < messages.size(); i++) {
+            ChatMessage msg = messages.get(i);
+            result.add(new ChatMessage(msg)); // 使用复制构造器
+            // 记录最近一轮对话的起点索引（最后一个 user 消息）
+            if ("user".equals(msg.getRole())) {
+                lastUserIndex = i;
             }
         }
 
-        int KEEP_RECENT = DEFAULT_KEEP_RECENT;
-        if (toolResults.size() <= KEEP_RECENT) {
-            return result; // 不需要压缩，返回深拷贝副本
-        }
+        int SAFE_TOOL_LENGTH = 500;
+        int HEAD_TAIL_SIZE = 200;
 
-        // 压缩早期的工具结果（除了最后 KEEP_RECENT 条）
-        List<ChatMessage> toCompact = toolResults.subList(0, toolResults.size() - KEEP_RECENT);
-        for (ChatMessage msg : toCompact) {
-            String content = msg.getContent();
-            if (content != null && content.length() > 100) {
-                String toolName = extractToolNameFromContent(content);
-                String summary = String.format("[Previous: used %s]", toolName);
-                msg.setContent(summary);
+        for (int i = 0; i < result.size(); i++) {
+            ChatMessage msg = result.get(i);
+            // 仅对最近一轮对话（最后一个 user 消消息）之前的工具调用结果进行特征提取压缩
+            if (i < lastUserIndex && msg != null && "system".equals(msg.getRole()) && isToolResultMessage(msg.getContent())) {
+                String content = msg.getContent();
+                if (content != null && content.length() > SAFE_TOOL_LENGTH) {
+                    String toolName = extractToolNameFromContent(content);
+                    String compactedContent;
+
+                    if ("file_manager".equals(toolName) || "command_executor".equals(toolName) || "grep_search".equals(toolName)) {
+                        String head = content.substring(0, HEAD_TAIL_SIZE);
+                        String tail = content.substring(content.length() - HEAD_TAIL_SIZE);
+                        int omittedLength = content.length() - (HEAD_TAIL_SIZE * 2);
+                        compactedContent = String.format("%s\n\n[... omitted %d chars, tool: %s ...]\n\n%s",
+                                head, omittedLength, toolName, tail);
+                    } else {
+                        compactedContent = String.format("%s\n\n[... content truncated for token saving. Tool: %s ...]",
+                                content.substring(0, SAFE_TOOL_LENGTH), toolName);
+                    }
+                    msg.setContent(compactedContent);
+                }
             }
         }
 
