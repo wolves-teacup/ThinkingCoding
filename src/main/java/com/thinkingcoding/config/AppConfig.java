@@ -350,6 +350,18 @@ public class AppConfig {
         @JsonProperty("description")
         private String description;
 
+        @JsonProperty("briefContext")
+        private String briefContext;
+
+        @JsonProperty("fullContext")
+        private String fullContext;
+
+        @JsonProperty("fullContextPath")
+        private String fullContextPath;
+
+        @JsonProperty("inputSchema")
+        private Map<String, Object> inputSchema = new HashMap<>();
+
         @JsonProperty("className")
         private String className;
 
@@ -364,6 +376,23 @@ public class AppConfig {
 
         public String getDescription() { return description; }
         public void setDescription(String description) { this.description = description; }
+
+        public String getBriefContext() { return briefContext; }
+        public void setBriefContext(String briefContext) { this.briefContext = briefContext; }
+
+        public String getFullContext() { return fullContext; }
+        public void setFullContext(String fullContext) { this.fullContext = fullContext; }
+
+        public String getFullContextPath() { return fullContextPath; }
+        public void setFullContextPath(String fullContextPath) { this.fullContextPath = fullContextPath; }
+
+        public Map<String, Object> getInputSchema() {
+            if (inputSchema == null) {
+                inputSchema = new HashMap<>();
+            }
+            return inputSchema;
+        }
+        public void setInputSchema(Map<String, Object> inputSchema) { this.inputSchema = inputSchema; }
 
         public String getClassName() { return className; }
         public void setClassName(String className) { this.className = className; }

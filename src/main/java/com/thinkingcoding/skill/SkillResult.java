@@ -1,7 +1,7 @@
 package com.thinkingcoding.skill;
 
 /**
- * Result object for skill execution.
+ * 技能执行结果封装类，包含执行成功与否、相关消息、测试文件路径、最后错误日志和尝试次数等信息。
  */
 public class SkillResult {
     private final boolean success;

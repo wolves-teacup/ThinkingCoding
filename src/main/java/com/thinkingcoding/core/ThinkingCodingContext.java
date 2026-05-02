@@ -16,11 +16,14 @@ import com.thinkingcoding.tools.exec.CommandExecutorTool;
 import com.thinkingcoding.tools.file.FileManagerTool;
 import com.thinkingcoding.tools.search.GrepSearchTool;
 import com.thinkingcoding.ui.ThinkingCodingUI;
+import com.thinkingcoding.skill.LazySkillToolAdapter;
+import com.thinkingcoding.skill.SkillContextLoader;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 上下文初始化过程
@@ -100,9 +103,21 @@ public class ThinkingCodingContext {
 
         // 服务层初始化
         ContextManager contextManager = new ContextManager(appConfig);  // 🔥 创建上下文管理器
+        
+        // 🔥 设置可用的 skill 列表到 ContextManager
+        if (appConfig.getSkills() != null && !appConfig.getSkills().isEmpty()) {
+            List<AppConfig.SkillConfig> enabledSkills = appConfig.getSkills().stream()
+                .filter(s -> s != null && s.isEnabled())
+                .collect(Collectors.toList());
+            contextManager.setAvailableSkills(enabledSkills);
+        }
+        
         AIService aiService = new LangChainService(appConfig, toolRegistry, contextManager);  // 🔥 注入 contextManager
         SessionService sessionService = new SessionService();
         PerformanceMonitor performanceMonitor = new PerformanceMonitor();
+
+        // 🔥 初始化并注册 Skills（使 AI 能够调用）- 在 AIService 创建后
+        initializeSkills(appConfig, aiService, toolRegistry);
 
         // UI层初始化
         ThinkingCodingUI ui = new ThinkingCodingUI();
@@ -164,6 +179,45 @@ public class ThinkingCodingContext {
             }
         }
     }
+
+    /**
+     * 🔥 初始化并注册 Skills
+     * 将配置的 skills 注册为 AI 可调用的工具
+     */
+    private static void initializeSkills(AppConfig appConfig, AIService aiService, ToolRegistry toolRegistry) {
+        if (appConfig == null || appConfig.getSkills() == null || appConfig.getSkills().isEmpty()) {
+            return;
+        }
+        int registeredCount = 0;
+
+        for (AppConfig.SkillConfig skillConfig : appConfig.getSkills()) {
+            if (skillConfig == null || !skillConfig.isEnabled()) {
+                continue;
+            }
+            if (skillConfig.getName() == null || skillConfig.getName().isBlank()) {
+                System.err.println("❌ 注册 Skill 失败: name 为空");
+                continue;
+            }
+
+            try {
+                LazySkillToolAdapter toolAdapter = new LazySkillToolAdapter(skillConfig, appConfig, aiService, toolRegistry);
+                toolRegistry.register(toolAdapter);
+                registeredCount++;
+
+                String brief = SkillContextLoader.resolveBriefContext(skillConfig);
+                String summary = brief != null ? brief : skillConfig.getDescription();
+                System.out.println("✅ 已注册 Skill(元数据): " + skillConfig.getName() + " - " + summary);
+            } catch (Exception e) {
+                System.err.println("❌ 注册 Skill '" + skillConfig.getName() + "' 失败: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+
+        if (registeredCount > 0) {
+            System.out.println("📦 共注册 " + registeredCount + " 个 Skill 工具");
+        }
+    }
+
 
     /**
      * 🔥 动态连接 MCP 服务器（用于命令行调用）

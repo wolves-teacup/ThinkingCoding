@@ -9,8 +9,10 @@ import com.thinkingcoding.tools.BaseTool;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 在ThinkingCodingCommand中管理AI交互的核心循环
@@ -137,6 +139,7 @@ public class AgentLoop {
 
     // 用于缓存工具调用，等待 AI 响应完成后再执行
     private final List<ToolCall> pendingToolCalls = new ArrayList<>();
+    private final Map<String, ChatMessage> cachedToolResults = new HashMap<>();
 
     private void handleToolCall(ToolCall toolCall) {
         // 🔥 不再显示工具调用通知（已在流式输出中显示）
@@ -154,8 +157,22 @@ public class AgentLoop {
             return;
         }
 
+        // 🔥 添加已执行工具的跟踪，防止重复执行相同工具调用
+        Set<String> executedToolSignatures = new HashSet<>();
+
         while (!pendingToolCalls.isEmpty()) {
             ToolCall pendingToolCall = pendingToolCalls.remove(0);
+            
+            // 🔥 检查是否为重复的工具调用（防止无限循环）
+            String toolSignature = generateToolSignature(pendingToolCall);
+            if (executedToolSignatures.contains(toolSignature)) {
+                context.getUi().displayWarning("⚠️  检测到重复的工具调用，复用缓存结果: " + pendingToolCall.getToolName());
+                ChatMessage cached = cachedToolResults.get(toolSignature);
+                if (cached != null) {
+                    history.add(new ChatMessage(cached));
+                }
+                continue;
+            }
 
             // 非流式触发的工具调用，需要显示完整的确认框
             ToolExecution execution = new ToolExecution(
@@ -175,6 +192,8 @@ public class AgentLoop {
                     // 🔥 只有执行成功时才显示成功总结
                     if (success) {
                         displayOperationSummary(pendingToolCall, action);
+                        // 🔥 记录已执行的工具签名
+                        executedToolSignatures.add(toolSignature);
                     }
                     break;
 
@@ -184,6 +203,9 @@ public class AgentLoop {
 
                     // 只有执行成功时才继续
                     if (executed) {
+                        // 🔥 记录已执行的工具签名
+                        executedToolSignatures.add(toolSignature);
+                        
                         // 根据工具类型执行额外操作
                         if (pendingToolCall.getToolName().equals("write_file")) {
                             // 自动执行编译和运行
@@ -203,6 +225,27 @@ public class AgentLoop {
                     break;
             }
         }
+    }
+    
+    /**
+     * 🔥 生成工具调用的唯一签名，用于检测重复调用
+     */
+    private String generateToolSignature(ToolCall toolCall) {
+        StringBuilder signature = new StringBuilder();
+        signature.append(toolCall.getToolName());
+        
+        if (toolCall.getParameters() != null && !toolCall.getParameters().isEmpty()) {
+            signature.append("_");
+            // 按参数名排序以确保一致性
+            List<String> sortedKeys = new ArrayList<>(toolCall.getParameters().keySet());
+            java.util.Collections.sort(sortedKeys);
+            
+            for (String key : sortedKeys) {
+                signature.append(key).append("=").append(toolCall.getParameters().get(key)).append(";");
+            }
+        }
+        
+        return signature.toString();
     }
 
     /**
@@ -587,6 +630,7 @@ public class AgentLoop {
                 ChatMessage toolResultMessage = new ChatMessage("system",
                     formatToolResultForHistory(toolCall, result));
                 history.add(toolResultMessage);
+                    cachedToolResults.put(generateToolSignature(toolCall), new ChatMessage(toolResultMessage));
 
                 return true;
             } else {
@@ -596,6 +640,7 @@ public class AgentLoop {
                 ChatMessage errorMessage = new ChatMessage("system",
                     "Tool execution failed: " + result.getError());
                 history.add(errorMessage);
+                    cachedToolResults.put(generateToolSignature(toolCall), new ChatMessage(errorMessage));
 
                 return false;
             }
@@ -607,6 +652,7 @@ public class AgentLoop {
             ChatMessage exceptionMessage = new ChatMessage("system",
                 "Tool execution exception: " + e.getMessage());
             history.add(exceptionMessage);
+            cachedToolResults.put(generateToolSignature(toolCall), new ChatMessage(exceptionMessage));
 
             // 调试时可以取消注释
             // e.printStackTrace();

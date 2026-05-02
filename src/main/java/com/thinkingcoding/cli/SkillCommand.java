@@ -4,6 +4,7 @@ import com.thinkingcoding.core.ThinkingCodingContext;
 import com.thinkingcoding.skill.Skill;
 import com.thinkingcoding.skill.SkillExecutionContext;
 import com.thinkingcoding.skill.SkillResult;
+import com.thinkingcoding.skill.SkillContextLoader;
 import com.thinkingcoding.config.AppConfig.SkillConfig;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -35,7 +36,19 @@ public class SkillCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        Skill skill = new com.thinkingcoding.skill.SkillRegistry().getSkill(name);
+        // 🔥 创建并初始化 SkillRegistry
+        com.thinkingcoding.skill.SkillRegistry skillRegistry = new com.thinkingcoding.skill.SkillRegistry();
+        
+        // 🔥 注册 AutoTestSkill
+        com.thinkingcoding.skill.autotest.AutoTestSkill autoTestSkill = new com.thinkingcoding.skill.autotest.AutoTestSkill(
+            context.getAiService(),
+            context.getToolRegistry(),
+            context.getAppConfig()
+        );
+        skillRegistry.register(autoTestSkill);
+        
+        // 🔥 获取 skill
+        Skill skill = skillRegistry.getSkill(name);
         if (skill == null) {
             context.getUi().displayError("Unknown skill: " + name);
             return 1;
@@ -51,7 +64,8 @@ public class SkillCommand implements Callable<Integer> {
         context.getUi().displayInfo("Running skill: " + name);
         int configRetries = (skillConfig != null && skillConfig.getConfig().containsKey("maxRetries")) ? (Integer) skillConfig.getConfig().get("maxRetries") : 3;
         int retries = maxRetries > 0 ? maxRetries : configRetries;
-        SkillExecutionContext executionContext = new SkillExecutionContext(source, test, model, retries);
+        String skillContext = SkillContextLoader.resolveFullContext(skillConfig);
+        SkillExecutionContext executionContext = new SkillExecutionContext(source, test, model, retries, skillContext);
         SkillResult result = skill.execute(executionContext);
 
         if (result.isSuccess()) {

@@ -15,7 +15,11 @@ import com.thinkingcoding.model.ChatMessage;
 import com.thinkingcoding.model.ToolCall;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * ReAct 驱动器，实现执行与反思的闭环。
@@ -78,6 +82,10 @@ public class ReActDriver {
         // 初始化待执行的工具调用队列
         List<ToolCall> toolCalls = new ArrayList<>(initialPlan.getToolCalls());
         int toolCallIndex = 0;
+        
+        // 🔥 添加已执行工具的跟踪，防止重复执行相同工具调用
+        Set<String> executedToolSignatures = new java.util.HashSet<>();
+        Map<String, ChatMessage> cachedToolResults = new HashMap<>();
 
         // 启动 ReAct 主循环，受最大步数限制
         while (steps < config.getMaxReActStepsPerTurn()) {
@@ -96,6 +104,17 @@ public class ReActDriver {
             // 获取并准备执行下一个工具调用
             ToolCall currentToolCall = toolCalls.get(toolCallIndex);
             toolCallIndex++;
+            
+            // 🔥 检查是否为重复的工具调用（防止无限循环）
+            String toolSignature = generateToolSignature(currentToolCall);
+            if (executedToolSignatures.contains(toolSignature)) {
+                context.getUi().displayWarning("⚠️  检测到重复的工具调用，复用缓存结果: " + currentToolCall.getToolName());
+                ChatMessage cached = cachedToolResults.get(toolSignature);
+                if (cached != null) {
+                    turn.getHistory().add(new ChatMessage(cached));
+                }
+                continue;
+            }
 
             // 检查是否达到单轮最大工具调用限制
             if (trace.size() >= config.getMaxToolCallsPerPlan()) {
@@ -114,10 +133,15 @@ public class ReActDriver {
 
             trace.add(outcome);
             steps++;
+            
+            // 🔥 记录已执行的工具签名
+            executedToolSignatures.add(toolSignature);
 
             // 将工具执行结果作为观察信息写回对话历史
             if (outcome.getHistoryMessageToAppend() != null) {
-                turn.getHistory().add(outcome.getHistoryMessageToAppend());
+                ChatMessage historyMessage = outcome.getHistoryMessageToAppend();
+                turn.getHistory().add(historyMessage);
+                cachedToolResults.put(toolSignature, new ChatMessage(historyMessage));
             }
 
             // 若工具被拒绝执行，跳过后续逻辑并处理下一个调用
@@ -167,5 +191,26 @@ public class ReActDriver {
         }
 
         return new ExecuteReactResult(steps, trace, cancelled, finalAssistantText);
+    }
+    
+    /**
+     * 🔥 生成工具调用的唯一签名，用于检测重复调用
+     */
+    private String generateToolSignature(ToolCall toolCall) {
+        StringBuilder signature = new StringBuilder();
+        signature.append(toolCall.getToolName());
+        
+        if (toolCall.getParameters() != null && !toolCall.getParameters().isEmpty()) {
+            signature.append("_");
+            // 按参数名排序以确保一致性
+            List<String> sortedKeys = new ArrayList<>(toolCall.getParameters().keySet());
+            java.util.Collections.sort(sortedKeys);
+            
+            for (String key : sortedKeys) {
+                signature.append(key).append("=").append(toolCall.getParameters().get(key)).append(";");
+            }
+        }
+        
+        return signature.toString();
     }
 }

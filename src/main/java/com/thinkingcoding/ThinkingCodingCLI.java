@@ -3,6 +3,7 @@ package com.thinkingcoding;
 import com.thinkingcoding.cli.ThinkingCodingCommand;
 import com.thinkingcoding.cli.SessionCommand;
 import com.thinkingcoding.cli.ConfigCommand;
+import com.thinkingcoding.cli.SkillCommand;
 import com.thinkingcoding.core.ThinkingCodingContext;
 import picocli.CommandLine;
 
@@ -28,6 +29,7 @@ public class ThinkingCodingCLI {
         CommandLine commandLine = new CommandLine(new ThinkingCodingCommand(context));
         commandLine.addSubcommand("session", new SessionCommand(context));
         commandLine.addSubcommand("config", new ConfigCommand(context));
+        commandLine.addSubcommand("skill", new SkillCommand(context));
 
         // 执行命令解析和路由
         int exitCode = commandLine.execute(args);

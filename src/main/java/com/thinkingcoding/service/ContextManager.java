@@ -28,6 +28,7 @@ public class ContextManager {
     private static final Logger log = LoggerFactory.getLogger(ContextManager.class);
 
     private final AppConfig appConfig;
+    private List<AppConfig.SkillConfig> availableSkills; // 🔥 存储可用的 skill 列表
 
     // 默认配置
     private static final int DEFAULT_MAX_HISTORY_TURNS = 10;  // 保留10轮（20条消息）
@@ -157,6 +158,17 @@ public class ContextManager {
      * @return 项目上下文系统消息，如果无法获取则返回 null
      */
     public ChatMessage buildProjectContextMessage() {
+        return buildProjectContextMessage(availableSkills);
+    }
+
+    /**
+     *  新增：构建固定的项目上下文消息（支持传入 skill 列表）
+     * 这个上下文会在每次 AI 调用时注入，永远不会被截断
+     *
+     * @param availableSkills 可用的 skill 列表，用于告诉 AI 有哪些 skill 可以调用
+     * @return 项目上下文系统消息，如果无法获取则返回 null
+     */
+    public ChatMessage buildProjectContextMessage(List<AppConfig.SkillConfig> availableSkills) {
         try {
             String cwd = System.getProperty("user.dir");
             if (cwd == null || cwd.isEmpty()) {
@@ -308,6 +320,41 @@ public class ContextManager {
             context.append("2. 不要在没有检查的情况下直接覆盖文件\n");
             context.append("3. 不要在用户选择前就执行操作\n");
             context.append("4. 不要忘记在操作完成后生成总结\n\n");
+
+            // 🔥 添加可用 Skill 列表
+            if (availableSkills != null && !availableSkills.isEmpty()) {
+                context.append("## 🎯 可用 Skill 工具（重要！）\n\n");
+                context.append("你可以调用以下 skill 来执行 specialized 任务。这些是特殊的工具，可以自动完成复杂的工作流程：\n\n");
+                context.append("**当用户要求生成测试/单元测试/测试类时：必须直接调用对应 skill（例如 autotest），不要先读取文件或使用其他工具。**\n\n");
+
+                for (AppConfig.SkillConfig skill : availableSkills) {
+                    if (skill != null && skill.isEnabled()) {
+                        String briefContext = com.thinkingcoding.skill.SkillContextLoader.resolveBriefContext(skill);
+                        String description = briefContext != null ? briefContext : "No description";
+                        context.append("### **").append(skill.getName()).append("**\n");
+                        context.append("- **描述**: ").append(description).append("\n");
+                        context.append("- **调用方式**: 使用工具调用 `").append(skill.getName()).append("(source=\"源文件路径\", test=\"可选的测试文件路径\")`\n");
+                        
+                        // 添加具体示例和触发条件
+                        if ("autotest".equalsIgnoreCase(skill.getName())) {
+                            context.append("- **何时使用**: \n");
+                            context.append("  * 用户要求“创建测试”、“生成单元测试”、“写测试代码”时\n");
+                            context.append("  * 用户说“为 XXX.java 写测试”、“给 XXX 添加测试”时\n");
+                            context.append("  * 用户询问“如何测试 XXX”、“XXX 的测试怎么写”时\n");
+                            context.append("- **示例**: \n");
+                            context.append("  * 用户：“为 HelloWorld.java 创建测试” → 调用 `autotest(source=\"HelloWorld.java\")`\n");
+                            context.append("  * 用户：“给 UserService 写单元测试” → 调用 `autotest(source=\"UserService.java\")`\n");
+                        }
+                        context.append("\n");
+                    }
+                }
+                
+                context.append("! **重要提示**:\n");
+                context.append("- Skill 是自动化工具，会执行完整的 workflows\n");
+                context.append("- 当用户请求与 skill 功能匹配时，**必须优先调用 skill**，而不是手动执行步骤\n");
+                context.append("- 调用 skill 后，等待它返回结果再继续\n");
+                context.append("- **不要**在应该调用 skill 时去搜索文件或手动编写代码\n\n");
+            }
 
             return new ChatMessage("system", context.toString());
         } catch (Exception e) {
@@ -663,6 +710,20 @@ public class ContextManager {
     public String getConfigSummary() {
         return String.format("Strategy: %s, MaxTurns: %d, MaxTokens: %d",
                 strategy, maxHistoryTurns, maxContextTokens);
+    }
+
+    /**
+     * 🔥 设置可用的 skill 列表
+     */
+    public void setAvailableSkills(List<AppConfig.SkillConfig> skills) {
+        this.availableSkills = skills;
+    }
+
+    /**
+     * 🔥 获取可用的 skill 列表
+     */
+    public List<AppConfig.SkillConfig> getAvailableSkills() {
+        return availableSkills;
     }
 }
 

@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -51,6 +52,37 @@ public class AutoTestSkill implements Skill {
     }
 
     @Override
+    public String getDescription() {
+        return "自动生成单元测试代码，并在测试失败时自动修复。适用于 Java、Python、Go、JavaScript/TypeScript 项目。当用户要求为某个源代码文件创建测试时调用此 skill。需要提供源文件路径，可选提供测试文件路径。";
+    }
+
+    @Override
+    public Object getInputSchema() {
+        Map<String, Object> schema = new java.util.HashMap<>();
+        schema.put("type", "object");
+        schema.put("description", "Auto test generation skill input parameters");
+        
+        Map<String, Object> properties = new java.util.HashMap<>();
+        
+        // source parameter
+        Map<String, Object> sourceParam = new java.util.HashMap<>();
+        sourceParam.put("type", "string");
+        sourceParam.put("description", "Path to the source code file that needs tests");
+        properties.put("source", sourceParam);
+        
+        // test parameter (optional)
+        Map<String, Object> testParam = new java.util.HashMap<>();
+        testParam.put("type", "string");
+        testParam.put("description", "Optional path for the generated test file. If not provided, will be auto-derived from source path");
+        properties.put("test", testParam);
+        
+        schema.put("properties", properties);
+        schema.put("required", new String[]{"source"});
+        
+        return schema;
+    }
+
+    @Override
     public SkillResult execute(SkillExecutionContext context) {
         Path sourcePath = Paths.get(context.getSourcePath()).toAbsolutePath().normalize();
         if (!Files.exists(sourcePath)) {
@@ -70,49 +102,67 @@ public class AutoTestSkill implements Skill {
             String model = (context.getModel() == null || context.getModel().isBlank())
                     ? appConfig.getDefaultModel() : context.getModel();
 
-            String generatedTest = generateInitialTest(sourcePath.toString(), sourceCode, testPath.toString(), model);
+            String skillContext = context.getSkillContext();
+            String generatedTest = generateInitialTest(sourcePath.toString(), sourceCode, testPath.toString(), model, skillContext);
             Files.writeString(testPath, generatedTest);
 
             int maxRetries = Math.max(1, context.getMaxRetries());
-            String mavenTestName = testPath.getFileName().toString().replace(".java", "");
+            int maxMeaningfulFixes = Math.max(1, maxRetries);
+            int meaningfulFixes = 0;
             String lastError = null;
             AutoTestOptions options = resolveOptions();
 
-            for (int attempt = 1; attempt <= maxRetries; attempt++) {
-                ToolResult runResult = runTargetTest(mavenTestName);
+            int attempt = 0;
+            while (attempt < maxRetries) {
+                attempt++;
+                ToolResult runResult = runTargetTest(testPath);
                 if (runResult.isSuccess()) {
-                    return SkillResult.success("AutoTest skill finished successfully.", testPath.toString(), attempt);
+                    String currentTestCode = Files.readString(testPath);
+                    if (isMeaningfulTest(sourcePath.toString(), currentTestCode)) {
+                        return SkillResult.success("AutoTest skill finished successfully.", testPath.toString(), attempt);
+                    }
+
+                    lastError = buildMeaningfulFailure(sourcePath.toString(), sourceCode, currentTestCode);
+                    if (meaningfulFixes >= maxMeaningfulFixes) {
+                        break;
+                    }
+                    meaningfulFixes++;
+                    String fixedTest = fixTest(sourcePath.toString(), sourceCode, testPath.toString(), currentTestCode, lastError, model, skillContext);
+                    Files.writeString(testPath, fixedTest);
+                    attempt--; // 不消耗失败次数，继续改写直到有意义或达到上限
+                    continue;
                 }
 
                 lastError = shrinkLog(runResult.getError() != null ? runResult.getError() : runResult.getOutput(), options);
-                if (attempt == maxRetries) {
+                if (attempt >= maxRetries) {
                     break;
                 }
 
                 String currentTestCode = Files.readString(testPath);
-                String fixedTest = fixTest(sourcePath.toString(), sourceCode, testPath.toString(), currentTestCode, lastError, model);
+                String fixedTest = fixTest(sourcePath.toString(), sourceCode, testPath.toString(), currentTestCode, lastError, model, skillContext);
                 Files.writeString(testPath, fixedTest);
             }
 
-            return SkillResult.failure("AutoTest skill failed after retries.", testPath.toString(), lastError, maxRetries);
+            int totalAttempts = Math.max(1, attempt + meaningfulFixes);
+            return SkillResult.failure("AutoTest skill failed after retries.", testPath.toString(), lastError, totalAttempts);
         } catch (Exception e) {
             return SkillResult.failure("AutoTest skill failed: " + e.getMessage(), null, null, 0);
         }
     }
 
-    private String generateInitialTest(String sourcePath, String sourceCode, String testPath, String model) {
+    private String generateInitialTest(String sourcePath, String sourceCode, String testPath, String model, String skillContext) {
         String prompt = TestPromptBuilder.buildInitialPrompt(sourcePath, sourceCode, testPath);
-        String raw = askModel(prompt, model);
+        String raw = askModel(prompt, model, skillContext);
         return extractJavaCodeOrFallback(raw, sourceCode, testPath);
     }
 
-    private String fixTest(String sourcePath, String sourceCode, String testPath, String currentTestCode, String errorLog, String model) {
+    private String fixTest(String sourcePath, String sourceCode, String testPath, String currentTestCode, String errorLog, String model, String skillContext) {
         String prompt = TestPromptBuilder.buildFixPrompt(sourcePath, sourceCode, testPath, currentTestCode, errorLog);
-        String raw = askModel(prompt, model);
+        String raw = askModel(prompt, model, skillContext);
         return extractJavaCodeOrFallback(raw, sourceCode, testPath);
     }
 
-    private String askModel(String prompt, String model) {
+    private String askModel(String prompt, String model, String skillContext) {
         StringBuilder content = new StringBuilder();
         aiService.setMessageHandler(message -> {
             if (message != null && "assistant".equals(message.getRole()) && message.getContent() != null) {
@@ -122,32 +172,137 @@ public class AutoTestSkill implements Skill {
         aiService.setToolCallHandler(toolCall -> {
             // Skill output is text-only; ignore tool calls from the model here.
         });
-        aiService.streamingChat(prompt, new ArrayList<>(), model);
+        ArrayList<ChatMessage> history = new ArrayList<>();
+        if (skillContext != null && !skillContext.isBlank()) {
+            history.add(new ChatMessage("system", skillContext));
+        }
+        aiService.streamingChat(prompt, history, model);
         return content.toString();
     }
 
-    private ToolResult runTargetTest(String testClassName) {
+    private ToolResult runTargetTest(Path testPath) {
         BaseTool commandExecutor = toolRegistry.getTool("command_executor");
         if (commandExecutor == null) {
             return ToolResult.error("command_executor tool is not available", 0);
         }
-        String command = "mvn -Dtest=" + testClassName + " test";
+        
+        String fileName = testPath.getFileName().toString();
+        String command = "";
+        if (fileName.endsWith(".java")) {
+            String testClassName = fileName.replace(".java", "");
+            command = "mvn -Dtest=" + testClassName + " test";
+            // Check if maven project exists or if gradle wrapper is there, but default to maven for now
+        } else if (fileName.endsWith(".py")) {
+            command = "pytest " + testPath.toString();
+        } else if (fileName.endsWith(".go")) {
+            command = "go test " + testPath.getParent().toString();
+        } else if (fileName.endsWith(".js") || fileName.endsWith(".ts")) {
+            command = "npm test -- " + testPath.toString();
+        } else {
+            return ToolResult.error("Unsupported test language for automatic test execution.", 1);
+        }
+        
         return commandExecutor.execute(command);
     }
 
-    private Path deriveTestPath(Path sourcePath, String sourceCode) {
-        String packageName = extractPackageName(sourceCode);
-        String className = extractClassName(sourceCode);
-        if (className == null || className.isBlank()) {
-            className = sourcePath.getFileName().toString().replace(".java", "");
+    private boolean isMeaningfulTest(String sourcePath, String testCode) {
+        if (testCode == null || testCode.isBlank()) {
+            return false;
+        }
+        String normalized = testCode.replace("\r\n", "\n").toLowerCase(Locale.ROOT);
+        if (normalized.contains("asserttrue(true)") || normalized.contains("asserttrue( true )")) {
+            return false;
+        }
+        if (normalized.contains("asserttrue(false)") || normalized.contains("assertfalse(true)")) {
+            return false;
+        }
+        if (normalized.contains("todo") || normalized.contains("not implemented")) {
+            return false;
+        }
+        if (sourcePath != null && sourcePath.endsWith(".java")) {
+            return normalized.contains("assert") || normalized.contains("verify(") || normalized.contains("assertthat(");
+        }
+        return normalized.contains("assert") || normalized.contains("expect(") || normalized.contains("should");
+    }
+
+    private String buildMeaningfulFailure(String sourcePath, String sourceCode, String testCode) {
+        StringBuilder message = new StringBuilder();
+        message.append("生成的测试未验证真实行为（存在无意义断言或缺少有效验证），请改写为能体现被测试类正确性的测试。\n");
+
+        List<String> methods = extractPublicMethods(sourceCode);
+        if (!methods.isEmpty()) {
+            message.append("建议至少覆盖的公开方法: ").append(String.join(", ", methods)).append("\n");
         }
 
-        String relative = packageName.isBlank()
-                ? className + "AutoTest.java"
-                : packageName.replace('.', '/') + "/" + className + "AutoTest.java";
+        String className = extractPrimaryClassName(sourceCode);
+        if (className != null) {
+            message.append("被测类: ").append(className).append("\n");
+        }
 
-        Path projectRoot = Paths.get(System.getProperty("user.dir"));
-        return projectRoot.resolve("src/test/java").resolve(relative);
+        if (testCode != null && !testCode.isBlank()) {
+            message.append("当前测试片段可能存在占位断言，请替换为真实断言。\n");
+        }
+        return message.toString();
+    }
+
+    private List<String> extractPublicMethods(String sourceCode) {
+        if (sourceCode == null || sourceCode.isBlank()) {
+            return new ArrayList<>();
+        }
+        Pattern methodPattern = Pattern.compile("public\\s+(?:static\\s+)?[\\w<>\\[\\]]+\\s+(\\w+)\\s*\\(");
+        Matcher matcher = methodPattern.matcher(sourceCode);
+        List<String> methods = new ArrayList<>();
+        while (matcher.find()) {
+            String name = matcher.group(1);
+            if (name == null || name.isBlank() || "main".equals(name)) {
+                continue;
+            }
+            if (!methods.contains(name)) {
+                methods.add(name);
+            }
+        }
+        return methods;
+    }
+
+    private String extractPrimaryClassName(String sourceCode) {
+        if (sourceCode == null || sourceCode.isBlank()) {
+            return null;
+        }
+        Matcher matcher = CLASS_PATTERN.matcher(sourceCode);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private Path deriveTestPath(Path sourcePath, String sourceCode) {
+        String fileName = sourcePath.getFileName().toString();
+        String extension = "";
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            extension = fileName.substring(dotIndex);
+            fileName = fileName.substring(0, dotIndex);
+        }
+
+        if (".java".equals(extension)) {
+            String packageName = extractPackageName(sourceCode);
+            String className = extractClassName(sourceCode);
+            if (className == null || className.isBlank()) {
+                className = fileName;
+            }
+
+            String relative = packageName.isBlank()
+                    ? className + "AutoTest.java"
+                    : packageName.replace('.', '/') + "/" + className + "AutoTest.java";
+
+            Path projectRoot = Paths.get(System.getProperty("user.dir"));
+            return projectRoot.resolve("src/test/java").resolve(relative);
+        } else if (".py".equals(extension)) {
+            return Paths.get(System.getProperty("user.dir")).resolve("tests").resolve("test_" + fileName + ".py");
+        } else if (".go".equals(extension)) {
+            return sourcePath.getParent().resolve(fileName + "_test.go");
+        } else if (".js".equals(extension) || ".ts".equals(extension)) {
+            return sourcePath.getParent().resolve(fileName + ".test" + extension);
+        } else {
+            return sourcePath.getParent().resolve(fileName + "Test" + extension);
+        }
     }
 
     private String extractPackageName(String sourceCode) {
@@ -162,11 +317,16 @@ public class AutoTestSkill implements Skill {
 
     private String extractJavaCodeOrFallback(String modelOutput, String sourceCode, String testPath) {
         if (modelOutput != null) {
-            Matcher matcher = CODE_BLOCK_PATTERN.matcher(modelOutput);
-            if (matcher.find()) {
-                return matcher.group(1).trim() + System.lineSeparator();
+            Matcher javaMatcher = CODE_BLOCK_PATTERN.matcher(modelOutput);
+            if (javaMatcher.find()) {
+                return javaMatcher.group(1).trim() + System.lineSeparator();
             }
-            if (modelOutput.contains("class ")) {
+            // For other languages, try to extract any code block
+            Matcher anyCodeMatcher = Pattern.compile("```\\w*\\s*([\\s\\S]*?)```").matcher(modelOutput);
+            if (anyCodeMatcher.find()) {
+                return anyCodeMatcher.group(1).trim() + System.lineSeparator();
+            }
+            if (modelOutput.contains("class ") || modelOutput.contains("def ") || modelOutput.contains("func ")) {
                 return modelOutput.trim() + System.lineSeparator();
             }
         }
@@ -324,4 +484,6 @@ public class AutoTestSkill implements Skill {
         }
     }
 }
+
+
 
