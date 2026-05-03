@@ -14,6 +14,7 @@ import com.thinkingcoding.tools.*;
 import com.thinkingcoding.tools.exec.CodeExecutorTool;
 import com.thinkingcoding.tools.exec.CommandExecutorTool;
 import com.thinkingcoding.tools.file.FileManagerTool;
+import com.thinkingcoding.tools.rag.CodeGraphTool;
 import com.thinkingcoding.tools.search.GrepSearchTool;
 import com.thinkingcoding.ui.ThinkingCodingUI;
 import com.thinkingcoding.skill.LazySkillToolAdapter;
@@ -94,6 +95,10 @@ public class ThinkingCodingContext {
 
         if (appConfig.getTools().getSearch().isEnabled()) {
             toolRegistry.register(new GrepSearchTool(appConfig));
+        }
+
+        if (appConfig.getTools().getCodeGraph().isEnabled()) {
+            toolRegistry.register(new CodeGraphTool(appConfig));
         }
 
         // 🔥 初始化 MCP 服务（如果启用）
@@ -412,3 +417,4 @@ public class ThinkingCodingContext {
         }
     }
 }
+

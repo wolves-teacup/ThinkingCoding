@@ -89,6 +89,8 @@ public class ToolRegistry implements ToolProvider {
                 return appConfig.getTools().getCodeExecutor().isEnabled();
             case "grep_search":
                 return appConfig.getTools().getSearch().isEnabled();
+            case "code_graph":
+                return appConfig.getTools().getCodeGraph().isEnabled();
             default:
                 return true;
         }

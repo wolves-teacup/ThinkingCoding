@@ -209,6 +209,9 @@ public class AppConfig {
         @JsonProperty("semanticSearch")
         private ToolConfig semanticSearch = new ToolConfig();
 
+        @JsonProperty("codeGraph")
+        private ToolConfig codeGraph = new ToolConfig();
+
         // Getters and Setters
         public ToolConfig getFileManager() {
             if (fileManager == null) {
@@ -263,6 +266,17 @@ public class AppConfig {
 
         public void setSemanticSearch(ToolConfig semanticSearch) {
             this.semanticSearch = semanticSearch;
+        }
+
+        public ToolConfig getCodeGraph() {
+            if (codeGraph == null) {
+                codeGraph = new ToolConfig();
+            }
+            return codeGraph;
+        }
+
+        public void setCodeGraph(ToolConfig codeGraph) {
+            this.codeGraph = codeGraph;
         }
     }
 
@@ -439,6 +453,9 @@ public class AppConfig {
         @JsonProperty("cloudStoreUrl")
         private String cloudStoreUrl;
 
+        @JsonProperty("codeGraph")
+        private RagCodeGraphConfig codeGraph = new RagCodeGraphConfig();
+
         public RagCloudConfig getCloud() {
             if (cloud == null) {
                 cloud = new RagCloudConfig();
@@ -448,6 +465,17 @@ public class AppConfig {
 
         public void setCloud(RagCloudConfig cloud) {
             this.cloud = cloud;
+        }
+
+        public RagCodeGraphConfig getCodeGraph() {
+            if (codeGraph == null) {
+                codeGraph = new RagCodeGraphConfig();
+            }
+            return codeGraph;
+        }
+
+        public void setCodeGraph(RagCodeGraphConfig codeGraph) {
+            this.codeGraph = codeGraph;
         }
 
         public String getApiKey() {
@@ -489,6 +517,73 @@ public class AppConfig {
 
         public int getChunkOverlap() { return chunkOverlap; }
         public void setChunkOverlap(int chunkOverlap) { this.chunkOverlap = chunkOverlap; }
+    }
+
+    @Data
+    public static class RagCodeGraphConfig {
+        @JsonProperty("languages")
+        private List<String> languages = new ArrayList<>();
+
+        @JsonProperty("treeSitterEnabled")
+        private boolean treeSitterEnabled = true;
+
+        @JsonProperty("treeSitterCommand")
+        private String treeSitterCommand = "tree-sitter";
+
+        @JsonProperty("includeExtensions")
+        private List<String> includeExtensions = new ArrayList<>();
+
+        @JsonProperty("excludeExtensions")
+        private List<String> excludeExtensions = new ArrayList<>();
+
+        public List<String> getLanguages() {
+            if (languages == null) {
+                languages = new ArrayList<>();
+            }
+            return languages;
+        }
+
+        public void setLanguages(List<String> languages) {
+            this.languages = languages;
+        }
+
+        public boolean isTreeSitterEnabled() {
+            return treeSitterEnabled;
+        }
+
+        public void setTreeSitterEnabled(boolean treeSitterEnabled) {
+            this.treeSitterEnabled = treeSitterEnabled;
+        }
+
+        public String getTreeSitterCommand() {
+            return treeSitterCommand;
+        }
+
+        public void setTreeSitterCommand(String treeSitterCommand) {
+            this.treeSitterCommand = treeSitterCommand;
+        }
+
+        public List<String> getIncludeExtensions() {
+            if (includeExtensions == null) {
+                includeExtensions = new ArrayList<>();
+            }
+            return includeExtensions;
+        }
+
+        public void setIncludeExtensions(List<String> includeExtensions) {
+            this.includeExtensions = includeExtensions;
+        }
+
+        public List<String> getExcludeExtensions() {
+            if (excludeExtensions == null) {
+                excludeExtensions = new ArrayList<>();
+            }
+            return excludeExtensions;
+        }
+
+        public void setExcludeExtensions(List<String> excludeExtensions) {
+            this.excludeExtensions = excludeExtensions;
+        }
     }
 
     @Data
@@ -548,3 +643,4 @@ public class AppConfig {
         public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
     }
 }
+
